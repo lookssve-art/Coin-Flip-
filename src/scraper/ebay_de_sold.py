@@ -2,6 +2,7 @@
 
 import logging
 import re
+from difflib import SequenceMatcher
 from urllib.parse import quote_plus
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -51,7 +52,7 @@ def build_sold_url(query, page=1):
         f"&LH_Complete=1&LH_Sold=1"
         f"&_sop=13"
         f"&rt=nc"
-        f"&_ipg=100"
+        f"&_ipg=240"
     )
     if page > 1:
         url += f"&_pgn={page}"
@@ -63,13 +64,12 @@ def parse_sold_page(html):
     soup = BeautifulSoup(html, "html.parser")
     items = []
 
-    for item_div in soup.select("li.s-item"):
-        # Skip the first "result" which is often a placeholder
-        title_el = item_div.select_one(".s-item__title")
+    for item_div in soup.select("li.s-item, div.s-item"):
+        title_el = item_div.select_one(".s-item__title span, .s-item__title")
         if not title_el:
             continue
         title = title_el.get_text(strip=True)
-        if title.lower() in ("shop on ebay", "ergebnisse", ""):
+        if not title or title.lower() in ("shop on ebay", "ergebnisse", "results"):
             continue
 
         # Price
@@ -85,7 +85,7 @@ def parse_sold_page(html):
         else:
             price = parse_price(price_text)
 
-        if price is None:
+        if price is None or price <= 0:
             continue
 
         # Determine currency
@@ -98,15 +98,21 @@ def parse_sold_page(html):
         # URL
         link_el = item_div.select_one("a.s-item__link")
         url = link_el["href"] if link_el and link_el.has_attr("href") else ""
+        # Clean tracking params from URL
+        if "?" in url:
+            url = url.split("?")[0]
 
         # Image
-        img_el = item_div.select_one("img.s-item__image-img")
+        img_el = item_div.select_one("img.s-item__image-img, .s-item__image img")
         image_url = ""
         if img_el:
             image_url = img_el.get("src", "") or img_el.get("data-src", "")
 
         # Sold date
-        date_el = item_div.select_one(".s-item__ended-date, .s-item__endedDate, .POSITIVE")
+        date_el = item_div.select_one(
+            ".s-item__ended-date, .s-item__endedDate, "
+            ".s-item__title--tagblock .POSITIVE, .s-item__detail--primary"
+        )
         sold_date = date_el.get_text(strip=True) if date_el else ""
 
         # Condition
@@ -128,20 +134,20 @@ def parse_sold_page(html):
 
 def scrape_sold_items(query, config):
     """Scrape eBay.de for sold items matching query."""
-    max_pages = config.get("scraping", {}).get("max_pages", 5)
-    delay_min = config.get("scraping", {}).get("delay_min", 2)
-    delay_max = config.get("scraping", {}).get("delay_max", 5)
+    max_pages = config.get("scraping", {}).get("max_pages", 10)
+    delay_min = config.get("scraping", {}).get("delay_min", 1.5)
+    delay_max = config.get("scraping", {}).get("delay_max", 4)
     proxy = config.get("scraping", {}).get("proxy", "") or None
 
     all_items = []
 
     for page in range(1, max_pages + 1):
         url = build_sold_url(query, page)
-        logger.info("Scraping eBay.de sold page %d for '%s'", page, query)
+        logger.info("Scraping eBay.de sold page %d/%d for '%s'", page, max_pages, query)
 
         resp = fetch_page(url, proxy=proxy, delay_min=delay_min, delay_max=delay_max)
         if not resp:
-            logger.warning("No response for page %d", page)
+            logger.warning("No response for page %d, stopping", page)
             break
 
         items = parse_sold_page(resp.text)
@@ -150,39 +156,91 @@ def scrape_sold_items(query, config):
             break
 
         all_items.extend(items)
-        logger.info("Found %d items on page %d", len(items), page)
+        logger.info("Found %d items on page %d (total: %d)", len(items), page, len(all_items))
 
     logger.info("Total sold items found for '%s': %d", query, len(all_items))
     return all_items
 
 
-def aggregate_sold_items(items, min_sold_count=3):
-    """Group sold items by normalized title and return products sold >= min_sold_count times."""
-    groups = defaultdict(list)
+def _title_similarity(title1, title2):
+    """Calculate similarity between two normalized titles."""
+    return SequenceMatcher(None, title1, title2).ratio()
 
-    for item in items:
-        key = normalize_title(item.title)
-        groups[key].append(item)
 
+def fuzzy_aggregate_sold_items(items, min_sold_count=2, similarity_threshold=0.60):
+    """Group sold items by fuzzy title matching.
+
+    Uses SequenceMatcher to group items with similar titles together,
+    rather than requiring exact matches. This handles variations like:
+    - "PSA 10 Charizard Base Set Holo #4" vs "Charizard PSA 10 Base Set 1999 Holo"
+    - Different seller formatting of the same product
+    """
+    if not items:
+        return []
+
+    # Normalize all titles
+    normalized = [(normalize_title(item.title), item) for item in items]
+
+    # Group using fuzzy matching
+    groups = []  # List of lists of (norm_title, item)
+    used = set()
+
+    for i, (norm_i, item_i) in enumerate(normalized):
+        if i in used:
+            continue
+
+        group = [(norm_i, item_i)]
+        used.add(i)
+
+        for j, (norm_j, item_j) in enumerate(normalized):
+            if j in used:
+                continue
+
+            # Check similarity against the first item in the group
+            sim = _title_similarity(norm_i, norm_j)
+            if sim >= similarity_threshold:
+                group.append((norm_j, item_j))
+                used.add(j)
+
+        groups.append(group)
+
+    # Convert groups to AggregatedProducts
     products = []
-    for norm_title, group in groups.items():
+    for group in groups:
         if len(group) < min_sold_count:
             continue
 
-        prices = [i.price for i in group]
+        items_in_group = [item for _, item in group]
+        prices = [item.price for item in items_in_group]
+
+        # Use the most common title variant (or the first one)
+        representative_title = items_in_group[0].title
+        representative_norm = group[0][0]
+
         products.append(AggregatedProduct(
-            title=group[0].title,
-            normalized_title=norm_title,
+            title=representative_title,
+            normalized_title=representative_norm,
             avg_price=sum(prices) / len(prices),
             min_price=min(prices),
             max_price=max(prices),
             sold_count=len(group),
-            currency=group[0].currency,
-            sample_url=group[0].url,
-            sample_image=group[0].image_url,
-            sold_items=group,
+            currency=items_in_group[0].currency,
+            sample_url=items_in_group[0].url,
+            sample_image=items_in_group[0].image_url,
+            sold_items=items_in_group,
         ))
 
-    # Sort by sold_count descending (most popular first)
-    products.sort(key=lambda p: p.sold_count, reverse=True)
+    # Sort by sold_count descending, then by avg_price descending
+    products.sort(key=lambda p: (p.sold_count, p.avg_price), reverse=True)
+
+    logger.info(
+        "Fuzzy grouped %d items into %d products (>= %d sales each)",
+        len(items), len(products), min_sold_count,
+    )
     return products
+
+
+# Keep old function as alias for backwards compatibility
+def aggregate_sold_items(items, min_sold_count=2):
+    """Group sold items - uses fuzzy matching."""
+    return fuzzy_aggregate_sold_items(items, min_sold_count=min_sold_count)

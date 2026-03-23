@@ -16,11 +16,11 @@ import schedule
 
 from src.scraper.ebay_de_sold import scrape_sold_items, aggregate_sold_items
 from src.scraper.ebay_international import search_international
-from src.scraper.helpers import normalize_title
+from src.scraper.helpers import normalize_title, extract_search_query, extract_core_identifiers
 from src.analyzer.profit_calculator import ProfitCalculator
 from src.analyzer.product_matcher import find_matches
 from src.database.db import get_connection, deal_exists, save_deal, update_search_history
-from src.notifier.discord_webhook import send_deal_notification, send_summary
+from src.notifier.discord_webhook import send_deal_notification, send_summary, send_progress
 
 # Configure logging
 logging.basicConfig(
@@ -51,52 +51,84 @@ def run_scan(config):
     conn = get_connection()
 
     total_deals = 0
+    total_items_scanned = 0
+    total_products_found = 0
     all_deals_summary = []
 
-    for query in queries:
+    for qi, query in enumerate(queries, 1):
         logger.info("-" * 40)
-        logger.info("Scanning query: '%s'", query)
+        logger.info("[%d/%d] Scanning query: '%s'", qi, len(queries), query)
 
         # Step 1: Scrape eBay.de sold items
         sold_items = scrape_sold_items(query, config)
+        total_items_scanned += len(sold_items)
+
         if not sold_items:
             logger.info("No sold items found for '%s', skipping", query)
+            send_progress(webhook_url, query, 0, 0, qi, len(queries))
             update_search_history(conn, query, 0)
             continue
 
-        # Step 2: Aggregate by product (find items sold multiple times)
+        # Step 2: Aggregate by product using fuzzy matching
         products = aggregate_sold_items(sold_items, min_sold_count=min_sold)
-        logger.info("Found %d products sold >= %d times for '%s'", len(products), min_sold, query)
+        total_products_found += len(products)
+
+        logger.info(
+            "Found %d products sold >= %d times from %d items for '%s'",
+            len(products), min_sold, len(sold_items), query,
+        )
+
+        # Send progress to Discord
+        send_progress(webhook_url, query, len(sold_items), len(products), qi, len(queries))
 
         if not products:
             update_search_history(conn, query, 0)
             continue
 
         # Step 3: For each popular product, search internationally
-        for product in products[:10]:  # Limit to top 10 per query
+        for product in products[:20]:  # Top 20 per query
             logger.info(
-                "Searching internationally for: %s (sold %dx, avg €%.2f)",
-                product.title[:60], product.sold_count, product.avg_price,
+                ">>> Product: '%s' (sold %dx, avg EUR %.2f, range EUR %.2f-%.2f)",
+                product.title[:70], product.sold_count, product.avg_price,
+                product.min_price, product.max_price,
             )
 
-            # Search with the original title on international sites
-            intl_listings = search_international(product.title, source_sites, config)
+            # Strategy 1: Search with cleaned-up title (remove German filler words)
+            search_query = extract_search_query(product.title)
+            logger.info("International search (cleaned): '%s'", search_query)
+            intl_listings = search_international(search_query, source_sites, config)
+
+            # Strategy 2: If no results, try with core identifiers only
+            if not intl_listings:
+                core_query = extract_core_identifiers(product.title)
+                if core_query and core_query != search_query:
+                    logger.info("No results, trying core identifiers: '%s'", core_query)
+                    intl_listings = search_international(core_query, source_sites, config)
+
+            # Strategy 3: If still no results, try first 5 words of original title
+            if not intl_listings:
+                words = product.title.split()[:5]
+                short_query = " ".join(words)
+                if short_query != search_query:
+                    logger.info("No results, trying short query: '%s'", short_query)
+                    intl_listings = search_international(short_query, source_sites, config)
 
             if not intl_listings:
-                # Try with a simplified search (fewer keywords)
-                words = product.title.split()[:6]
-                simplified = " ".join(words)
-                logger.info("No results, trying simplified: '%s'", simplified)
-                intl_listings = search_international(simplified, source_sites, config)
-
-            if not intl_listings:
-                logger.info("No international listings found")
+                logger.info("No international listings found for any search strategy")
                 continue
+
+            logger.info("Found %d international listings", len(intl_listings))
 
             # Step 4: Find matches and calculate profit
             matches = find_matches(product, intl_listings, config, profit_calc)
 
-            for listing, deal_info, similarity in matches[:5]:  # Top 5 matches per product
+            if not matches:
+                logger.info("No profitable matches found")
+                continue
+
+            logger.info("Found %d profitable matches!", len(matches))
+
+            for listing, deal_info, similarity in matches[:5]:  # Top 5 per product
                 norm = normalize_title(product.title)
 
                 # Check if we already notified about this deal
@@ -106,8 +138,9 @@ def run_scan(config):
 
                 # Step 5: Send Discord notification
                 logger.info(
-                    "DEAL FOUND: %s | Profit: €%.2f (%.1f%%)",
-                    product.title[:50], deal_info["profit_eur"], deal_info["profit_percent"],
+                    "*** DEAL: %s | Profit: EUR %.2f (%.1f%%) | Source: %s ***",
+                    product.title[:50], deal_info["profit_eur"],
+                    deal_info["profit_percent"], listing.site_id,
                 )
 
                 send_deal_notification(webhook_url, product, listing, deal_info)
@@ -133,17 +166,24 @@ def run_scan(config):
                     "profit_pct": deal_info["profit_percent"],
                 })
 
-                # Small delay between Discord messages to avoid rate limiting
-                time.sleep(1)
+                # Small delay between Discord messages
+                time.sleep(1.5)
 
         update_search_history(conn, query, len(products))
 
     # Send summary
-    send_summary(webhook_url, len(queries), total_deals, all_deals_summary)
+    send_summary(
+        webhook_url, len(queries), total_deals, all_deals_summary,
+        total_items_scanned=total_items_scanned,
+        total_products_found=total_products_found,
+    )
 
     conn.close()
     logger.info("=" * 60)
-    logger.info("Scan complete. Found %d deals.", total_deals)
+    logger.info(
+        "Scan complete. Scanned %d items, found %d products, %d deals.",
+        total_items_scanned, total_products_found, total_deals,
+    )
     logger.info("=" * 60)
 
 
