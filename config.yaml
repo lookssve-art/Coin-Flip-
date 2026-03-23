@@ -1,0 +1,57 @@
+discord:
+  webhook_url: "https://discord.com/api/webhooks/1485628296275165345/JWsBkUiMBGdDZS9xpW_stsQQyCffw_6JOdFcfOGNpzip2LxRWCfySspYT9TC0h5JAZVd"
+
+search:
+  queries:
+    - "PSA 10 Pokemon"
+    - "PSA 10 One Piece"
+    - "PSA 9 Pokemon"
+    - "PSA 9 One Piece"
+    - "WATA 9.8"
+    - "WATA 9.6"
+    - "VGA 85+"
+    - "BGS 9.5 Pokemon"
+    - "PSA 10 Yugioh"
+    - "PSA 10 Dragon Ball"
+    - "sealed booster box Pokemon"
+    - "sealed booster box One Piece"
+    - "LEGO retired sealed"
+    - "PSA 10 sports card"
+    - "CGC 9.8 comic"
+
+  min_sold_count: 3
+  min_profit_percent: 20
+  max_results_per_query: 100
+  days_lookback: 30
+
+markets:
+  source_sites:
+    - id: "EBAY-US"
+      url: "https://www.ebay.com"
+      currency: "USD"
+    - id: "EBAY-JP"
+      url: "https://www.ebay.co.jp"
+      currency: "JPY"
+    - id: "EBAY-GB"
+      url: "https://www.ebay.co.uk"
+      currency: "GBP"
+
+costs:
+  shipping_estimates:
+    USD: 45
+    JPY: 3000
+    GBP: 15
+  customs:
+    einfuhrumsatzsteuer: 0.19
+    zoll_rate: 0.0
+    de_minimis_eur: 150
+  ebay_fee_percent: 0.13
+
+scraping:
+  delay_min: 2
+  delay_max: 5
+  max_pages: 5
+  proxy: ""  # Optional: "http://user:pass@proxy:port"
+
+scheduler:
+  interval_hours: 4
