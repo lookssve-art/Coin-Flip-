@@ -23,6 +23,7 @@ Verwendung:
     python run.py serve                 # Autonomer Dauerbetrieb: Bot + Pipeline im Takt
     python run.py check                 # Setup-Diagnose: was ist konfiguriert, was fehlt
     python run.py lexware-kategorien    # Lexware-Kategorie-UUIDs auflisten (fuer kategorie_map)
+    python run.py gewinn [bank_csv]     # Einnahmen/Ausgaben/Gewinn seit Geschaeftsbeginn
 """
 
 from __future__ import annotations
@@ -658,6 +659,43 @@ def cmd_lexware_kategorien(config: dict) -> int:
     return 0
 
 
+def cmd_gewinn(config: dict, bank_csv: str = "") -> int:
+    """Schnelle EÜR auf Kontobasis (Ist-Prinzip): Einnahmen/Ausgaben/Gewinn ab Gruendung."""
+    from decimal import Decimal
+    from datetime import date
+    from src.util import ab_geschaeftsbeginn
+    pfad = bank_csv or config.get("pfade", {}).get("bank_csv", "")
+    try:
+        txs = _bank_transaktionen(config, pfad)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Keine Kontodaten ({pfad}): {exc}\n"
+              "Lexware-Kontoumsaetze als CSV exportieren und Pfad angeben:\n"
+              "  python run.py gewinn <bank_csv>")
+        return 2
+    beginn = _geschaeftsbeginn(config)
+    txs = [t for t in txs if ab_geschaeftsbeginn(t.datum, beginn)]
+    if not txs:
+        print(f"Keine Buchungen ab Geschaeftsbeginn ({beginn}).")
+        return 0
+    einnahmen = sum((t.betrag for t in txs if t.betrag > 0), Decimal("0"))
+    ausgaben = sum((-t.betrag for t in txs if t.betrag < 0), Decimal("0"))
+    gewinn = einnahmen - ausgaben
+    von = min(t.datum for t in txs)
+    bis = max(t.datum for t in txs)
+    fb = Decimal(str(config.get("schwellen", {}).get("gewerbesteuer_freibetrag_eur", 24500)))
+    print(f"\n  Gewinn seit Geschaeftsbeginn {beginn or '—'}")
+    print(f"  Zeitraum der Buchungen: {von} .. {bis}  ({len(txs)} Kontobewegungen)\n")
+    print(f"    Einnahmen:  {einnahmen:>12,.2f} EUR")
+    print(f"    Ausgaben:   {ausgaben:>12,.2f} EUR")
+    print(f"    ─────────────────────────────")
+    print(f"    Gewinn:     {gewinn:>12,.2f} EUR\n")
+    print("  (Ist-Prinzip / Kontobasis — schnelle Uebersicht; die detaillierte")
+    print("   EÜR nach Kategorien liefert `sync` in data/euer_uebersicht.csv.)")
+    if gewinn > fb:
+        print(f"\n  Hinweis: Gewinn ueber Gewerbesteuer-Freibetrag ({fb} EUR).")
+    return 0
+
+
 def _schritt(name: str, fn) -> bool:
     """Fuehrt einen Pipeline-Schritt robust aus (Fehler brechen den Lauf nicht ab)."""
     print(f"\n▶ {name}")
@@ -749,6 +787,7 @@ COMMANDS = {
     "serve": cmd_serve,
     "check": cmd_check,
     "lexware-kategorien": cmd_lexware_kategorien,
+    "gewinn": cmd_gewinn,
 }
 
 
