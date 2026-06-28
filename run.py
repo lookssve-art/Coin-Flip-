@@ -775,7 +775,12 @@ def cmd_run_all(config: dict) -> int:
     betrieb = config.get("betrieb", {})
     ebay = config.get("integrationen", {}).get("ebay", {})
 
-    # 1) eBay-Kaeufe -> Einkaufspreise (nur wenn Export vorhanden).
+    # 1a) Neue eBay-Kaeufe live holen (~90 Tage), wenn ein Token vorhanden ist.
+    if ebay.get("refresh_token") or ebay.get("access_token"):
+        _schritt("eBay-Kaeufe (Trading-API, letzte ~90 Tage)",
+                 lambda: cmd_ebay_kaeufe_api(config))
+
+    # 1b) Kaufhistorie -> Einkaufspreise (nur wenn Export vorhanden).
     if os.path.exists(pfade.get("ebay_kaeufe_export", "")):
         _schritt("eBay-Kaeufe -> Einkaufspreise", lambda: cmd_ebay_kaeufe(config))
 

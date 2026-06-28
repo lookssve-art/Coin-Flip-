@@ -13,10 +13,12 @@ einen Server mit ausgehendem Internetzugang.
 
 `run-all` führt jeden Schritt nur aus, wenn seine Voraussetzungen erfüllt sind
 (robust — ein fehlender Schritt bricht den Lauf nicht ab):
+- `ebay-kaeufe-api` → neue Käufe der letzten ~90 Tage live holen (mergen), falls ein
+  eBay-Token (`refresh_token` oder `access_token`) gesetzt ist
 - `ebay-kaeufe` → Einkaufspreise, falls `pfade.ebay_kaeufe_export` existiert
-- `ebay-sync` → Verkäufe, falls eBay-`ru_name` + `refresh_token` gesetzt
-- `sync` → Reconciliation + Journale + Schwellen, falls `pfade.belege_inbox` (Ordner)
-  und `pfade.bank_csv` vorhanden
+- `ebay-sync` → Verkäufe + Auszahlungen, falls eBay-`ru_name` + `refresh_token` gesetzt
+- `sync` → Reconciliation + Payout-Abgleich + §25a + USt-VA + EÜR + Schwellen, falls
+  `pfade.belege_inbox` (Ordner) und `pfade.bank_csv` vorhanden
 
 ## Variante A — Docker (empfohlen)
 
