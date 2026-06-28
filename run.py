@@ -189,19 +189,21 @@ def cmd_telegram(config: dict) -> int:
     return 0
 
 
-def _ebay_oauth(config: dict):
+def _ebay_oauth(config: dict, *, brauche_ru_name: bool = False):
     from src.integrations import EbayOAuth
     e = config.get("integrationen", {}).get("ebay", {})
-    fehlend = [k for k in ("app_id", "cert_id", "ru_name") if not e.get(k)]
+    pflicht = ["app_id", "cert_id"] + (["ru_name"] if brauche_ru_name else [])
+    fehlend = [k for k in pflicht if not e.get(k)]
     if fehlend:
         print(f"eBay-Config unvollstaendig: {', '.join(fehlend)} fehlen in config.yaml.")
         return None, e
-    return EbayOAuth(app_id=e["app_id"], cert_id=e["cert_id"], ru_name=e["ru_name"],
+    return EbayOAuth(app_id=e["app_id"], cert_id=e["cert_id"],
+                     ru_name=e.get("ru_name", ""),
                      environment=e.get("environment", "production")), e
 
 
 def cmd_ebay_auth(config: dict) -> int:
-    oauth, _ = _ebay_oauth(config)
+    oauth, _ = _ebay_oauth(config, brauche_ru_name=True)
     if oauth is None:
         return 2
     print("1) Oeffne diese URL im Browser und bestaetige den Zugriff:\n")
@@ -212,7 +214,7 @@ def cmd_ebay_auth(config: dict) -> int:
 
 
 def cmd_ebay_token(config: dict, code: str = "") -> int:
-    oauth, _ = _ebay_oauth(config)
+    oauth, _ = _ebay_oauth(config, brauche_ru_name=True)
     if oauth is None:
         return 2
     if not code:
@@ -621,9 +623,8 @@ def cmd_check(config: dict) -> int:
 
     print("\neBay (Verkaeufe + § 25a-Einkaufspreise):")
     print(zeile(bool(ebay.get("app_id") and ebay.get("cert_id")), "App-ID + Cert-ID"))
-    print(zeile(bool(ebay.get("ru_name")), "RuName", "aus Developer Portal eintragen"))
     if ebay.get("refresh_token"):
-        print(zeile(True, "Refresh-Token (dauerhaft)"))
+        print(zeile(True, "Refresh-Token (dauerhaft) — RuName nicht noetig"))
     elif ebay.get("access_token"):
         print(zeile(True, "Access-Token hinterlegt (⏳ ~2h — fuer Dauerbetrieb refresh_token holen)"))
     else:
@@ -648,8 +649,8 @@ def cmd_check(config: dict) -> int:
                "optional: gegroundete /duden-Antworten + bessere Klassifikation"))
 
     fehlt = []
-    if not ebay.get("ru_name"): fehlt.append("eBay RuName")
-    if not ebay.get("refresh_token"): fehlt.append("eBay Refresh-Token")
+    if not (ebay.get("refresh_token") or ebay.get("access_token")):
+        fehlt.append("eBay Refresh-Token")
     if not kat: fehlt.append("Lexware kategorie_map")
     if not os.path.exists(pfade.get("bank_csv", "")): fehlt.append("Konto-CSV")
     if not tg.get("allowed_user_ids"): fehlt.append("Telegram User-ID")
@@ -721,9 +722,9 @@ def cmd_ebay_kaeufe_api(config: dict, tage: str = "90") -> int:
     e = config.get("integrationen", {}).get("ebay", {})
     # Access-Token besorgen (Refresh bevorzugt, sonst direkt hinterlegt).
     access_token = None
-    if e.get("refresh_token") and e.get("app_id") and e.get("cert_id") and e.get("ru_name"):
+    if e.get("refresh_token") and e.get("app_id") and e.get("cert_id"):
         try:
-            oauth = EbayOAuth(app_id=e["app_id"], cert_id=e["cert_id"], ru_name=e["ru_name"],
+            oauth = EbayOAuth(app_id=e["app_id"], cert_id=e["cert_id"],
                               environment=e.get("environment", "production"))
             access_token = oauth.refresh(e["refresh_token"]).access_token
         except Exception as exc:  # noqa: BLE001
@@ -788,8 +789,8 @@ def cmd_run_all(config: dict) -> int:
     if os.path.exists(pfade.get("ebay_kaeufe_export", "")):
         _schritt("eBay-Kaeufe -> Einkaufspreise", lambda: cmd_ebay_kaeufe(config))
 
-    # 2) eBay-Verkaeufe abrufen (nur wenn OAuth vollstaendig konfiguriert).
-    if ebay.get("ru_name") and ebay.get("refresh_token"):
+    # 2) eBay-Verkaeufe abrufen (Refresh- oder Access-Token genuegt, kein RuName noetig).
+    if ebay.get("refresh_token") or ebay.get("access_token"):
         _schritt("eBay-Verkaufssync",
                  lambda: cmd_ebay_sync(config, str(betrieb.get("ebay_sync_tage", 30))))
 

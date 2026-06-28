@@ -64,7 +64,8 @@ class TokenResponse:
 class EbayOAuth:
     app_id: str                         # Client ID
     cert_id: str                        # Client Secret
-    ru_name: str                        # Redirect-URL-Name (RuName), nicht die rohe URL
+    ru_name: str = ""                   # RuName — nur fuer den initialen Consent noetig,
+                                        # NICHT fuer den laufenden Refresh
     environment: str = "production"
     scopes: tuple = DEFAULT_SCOPES
     _poster: Callable[..., dict] = field(default=post_form, repr=False)
@@ -75,6 +76,8 @@ class EbayOAuth:
 
     def consent_url(self, state: Optional[str] = None) -> str:
         """Baut die Consent-URL, die der Konto-Inhaber im Browser bestaetigt."""
+        if not self.ru_name:
+            raise ValueError("consent_url braucht einen ru_name (RuName).")
         params = {
             "client_id": self.app_id,
             "redirect_uri": self.ru_name,
