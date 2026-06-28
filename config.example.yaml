@@ -42,6 +42,7 @@ pfade:
   belegspeicher: "belege/"               # WORM / versioniert
   verfahrensdoku: "docs/verfahrensdokumentation.md"
   ebay_export: "data/ebay_rows.json"     # eBay-Verkaufszeilen (von ebay-sync befuellt)
+  ebay_payouts: "data/ebay_payouts.json" # eBay-Auszahlungen (von ebay-sync befuellt)
   ebay_kaeufe_export: "data/ebay_kaeufe.json"  # eBay-Kaufhistorie (Bestellverlauf-Export)
   einkaufspreise: "data/einkaufspreise.json"  # {product_id: preis} fuer § 25a
   belege_inbox: "inbox/belege/"          # autonomer Betrieb: Belege hier ablegen

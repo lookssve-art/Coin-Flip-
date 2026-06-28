@@ -13,7 +13,7 @@ from __future__ import annotations
 import csv
 from typing import Iterable
 
-from ..reconciliation import MatchResult
+from ..reconciliation import MatchResult, PayoutMatch
 from ..tax.differenzbesteuerung import MargenErgebnis
 
 
@@ -32,6 +32,28 @@ def schreibe_buchungsjournal(pfad: str, ergebnisse: Iterable[MatchResult]) -> in
                 "differenz": f"{r.differenz}",
                 "buchungsjahr": r.buchungsjahr or "",
                 "gruende": " | ".join(r.gruende),
+            })
+            n += 1
+    return n
+
+
+def schreibe_payout_journal(pfad: str, matches: Iterable[PayoutMatch]) -> int:
+    """Schreibt das eBay-Payout-Reconciliation-Journal als CSV."""
+    felder = ["payout_id", "status", "bank_tx_id", "payout_betrag", "bank_betrag",
+              "differenz", "gruende"]
+    n = 0
+    with open(pfad, "w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=felder, delimiter=";")
+        writer.writeheader()
+        for m in matches:
+            writer.writerow({
+                "payout_id": m.payout_id,
+                "status": m.status.value,
+                "bank_tx_id": m.bank_tx_id or "",
+                "payout_betrag": f"{m.payout_betrag}",
+                "bank_betrag": f"{m.bank_betrag}",
+                "differenz": f"{m.differenz}",
+                "gruende": " | ".join(m.gruende),
             })
             n += 1
     return n

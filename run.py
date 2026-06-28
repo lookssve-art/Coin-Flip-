@@ -254,14 +254,19 @@ def cmd_ebay_sync(config: dict, tage: str = "30") -> int:
         return 1
     rows = EbayFinanceClient.to_rows(roh)
     sales = importiere_ebay_verkaeufe(rows)
-    # Zeilen fuer den `sync`-Lauf persistieren (data/ebay_rows.json).
+    # Zeilen fuer den `sync`-Lauf persistieren (data/ebay_rows.json + Payouts roh).
     import json
     export = config.get("pfade", {}).get("ebay_export", "data/ebay_rows.json")
     os.makedirs(os.path.dirname(export) or ".", exist_ok=True)
     with open(export, "w", encoding="utf-8") as fh:
         json.dump(rows, fh, ensure_ascii=False, indent=2)
-    print(f"eBay-Sync {start}..{ende}: {len(roh)} Transaktionen -> {len(sales)} Vorgaenge.")
-    print(f"  Verkaufszeilen gespeichert: {export}")
+    payout_pfad = config.get("pfade", {}).get("ebay_payouts", "data/ebay_payouts.json")
+    payouts_roh = [t for t in roh if (t.get("transactionType") or "").upper() == "PAYOUT"]
+    with open(payout_pfad, "w", encoding="utf-8") as fh:
+        json.dump(payouts_roh, fh, ensure_ascii=False, indent=2)
+    print(f"eBay-Sync {start}..{ende}: {len(roh)} Transaktionen -> {len(sales)} Vorgaenge, "
+          f"{len(payouts_roh)} Payouts.")
+    print(f"  Verkaufszeilen: {export}; Payouts: {payout_pfad}")
     unklar = [r for r in rows if r.get("_review")]
     if unklar:
         print(f"  {len(unklar)} zur Pruefung markiert (unklarer Typ).")
@@ -412,8 +417,25 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     offen = sum(1 for r in ergebnisse if r.status == MatchStatus.REVIEW_REQUIRED)
     unmatched = sum(1 for r in ergebnisse if r.status == MatchStatus.UNMATCHED)
     print(f"Sync: {len(receipts)} Belege, {len(txs)} Banktransaktionen, {len(sales)} eBay-Verkaeufe.")
-    print(f"  Reconciliation -> {n} Zeilen (data/buchungsjournal.csv); "
+    print(f"  Beleg-Reconciliation -> {n} Zeilen (data/buchungsjournal.csv); "
           f"{offen} Review, {unmatched} ohne Beleg.")
+
+    # Payout-Reconciliation: eBay-Auszahlungen <-> Bank-Eingaenge.
+    from src.reconciliation import PayoutReconciler, PayoutStatus, extrahiere_payouts
+    from src.export import schreibe_payout_journal
+    payouts_roh = _lade_json(config.get("pfade", {}).get("ebay_payouts", "")) or []
+    payouts = extrahiere_payouts(payouts_roh)
+    if payouts:
+        pmatches = PayoutReconciler().reconcile(payouts, txs)
+        schreibe_payout_journal("data/payout_journal.csv", pmatches)
+        p_ok = sum(1 for m in pmatches if m.status == PayoutStatus.MATCHED)
+        p_diff = [m for m in pmatches if m.status == PayoutStatus.DIFFERENZ]
+        p_un = sum(1 for m in pmatches if m.status == PayoutStatus.UNMATCHED)
+        print(f"  Payout-Reconciliation -> {len(payouts)} Payouts: "
+              f"{p_ok} ok, {len(p_diff)} Differenz, {p_un} ohne Bank-Eingang "
+              f"(data/payout_journal.csv).")
+        for m in p_diff:
+            queue.add(f"Payout {m.payout_id}: Bank-Differenz {m.differenz} EUR", bezug=m.payout_id)
 
     # Verkaufs-Journal: § 25a-Margen + USt je Satz.
     einkaufspreise_raw = _lade_json(config.get("pfade", {}).get("einkaufspreise", "")) or {}

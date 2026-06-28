@@ -109,6 +109,14 @@ python run.py lexware-push ./belege     # Belege als Draft-Vouchers nach Lexware
 (Lexware-Kategorie-UUIDs aus `/posting-categories`) auf einen Voucher; Belege ohne
 Mapping, mit unsicherer Vorsteuer oder offener Review werden **übersprungen**, nicht gebucht.
 
+### eBay-Payout-Reconciliation
+
+`sync` gleicht zusätzlich die **eBay-Auszahlungen** (`pfade.ebay_payouts`, von
+`ebay-sync` befüllt) gegen die **Bank-Eingänge** ab (eine Auszahlung = viele
+Einzelumsätze) und schreibt `data/payout_journal.csv`. Betragsdifferenzen über
+Toleranz und Payouts ohne Bank-Eingang werden markiert → Review.
+Modul: [`src/reconciliation/payout.py`](src/reconciliation/payout.py).
+
 ### eBay-Verkäufe + § 25a im `sync`
 
 `sync` zieht zusätzlich die eBay-Verkäufe (`pfade.ebay_export`, von `ebay-sync` befüllt)
