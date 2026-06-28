@@ -34,9 +34,11 @@ Ergänzt die vier Lücken, die in einer Betriebsprüfung über „anerkannt" vs.
 | **E-Rechnungs-Empfang** (XRechnung/ZUGFeRD-Erkennung + Parsing) | [`src/einvoice/parser.py`](src/einvoice/parser.py) |
 | Review-Queue + `REVIEW_REQUIRED`-Trigger (Human-in-the-Loop) | [`src/review/queue.py`](src/review/queue.py) |
 | **Auto-Verfahrensdokumentation** (GoBD) | [`src/verfahrensdoku/generator.py`](src/verfahrensdoku/generator.py) |
+| **Bank-/eBay-Import** (read-only, normalisierend, idempotent) | [`src/imports/`](src/imports/) |
+| **Reconciliation-Grundlogik** (Bank ↔ Belege, Teilzahlung/Refund/Differenz) | [`src/reconciliation/engine.py`](src/reconciliation/engine.py) |
 
-Noch offen (spätere MVP-Stufen): Bank-/eBay-Import + Reconciliation, OCR-Pipeline,
-Lexware-Export. Priorisiert wurde — wie in der Spezifikation gefordert — das
+Noch offen (spätere MVP-Stufen): OCR-Pipeline (3), Lexware-Export (6).
+Priorisiert wurde — wie in der Spezifikation gefordert — das
 Compliance-Fundament **vor** den Komfortfeatures.
 
 ## Schnellstart

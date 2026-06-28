@@ -204,7 +204,8 @@ Erzeugt jederzeit: Umsatzübersicht (Monat/Jahr), **USt-VA-Vorbereitung** (Zahll
 | 1 — Datenmodell | ✅ | `src/models.py` |
 | 1 — Audit-Log (append-only, hash-verkettet) | ✅ | `src/audit/audit_log.py` |
 | 1 — Beleg-Storage (WORM, inhaltsadressiert) | ✅ | `src/storage/receipt_store.py` |
-| 2 — Bank/eBay-Import + Reconciliation | ⏳ offen | — |
+| 2 — Bank/eBay-Import (read-only) | ✅ | `src/imports/bank.py`, `src/imports/ebay.py` |
+| 2 — Reconciliation-Grundlogik | ✅ | `src/reconciliation/engine.py` |
 | 3 — OCR-Pipeline | ⏳ offen | — |
 | 3 — Review-Queue + REVIEW_REQUIRED-Trigger | ✅ | `src/review/queue.py` |
 | 4 — Differenzbesteuerung § 25a (Einzel-/Gesamtdifferenz) | ✅ | `src/tax/differenzbesteuerung.py` |
