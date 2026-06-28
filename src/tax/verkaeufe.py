@@ -33,6 +33,8 @@ class VerkaufsJournal:
     review_ids: list = field(default_factory=list)            # Verkaeufe ohne Einkaufspreis
     umsatz_brutto: Decimal = Decimal("0")                     # Gesamt-Bruttoumsatz (§19-Monitoring)
     oss_netto_eu_b2c: Decimal = Decimal("0")                  # EU-B2C netto OHNE §25a (OSS-Schwelle)
+    regel_netto_je_satz: dict = field(default_factory=dict)   # Bemessungsgrundlage je Satz (USt-VA Kz)
+    differenz_netto: Decimal = Decimal("0")                   # Netto-Marge § 25a (geht in 19%-Basis)
 
 
 def _round(v: Decimal) -> Decimal:
@@ -67,6 +69,7 @@ def journalisiere_verkaeufe(
             marge = einzeldifferenz(verkauf, Decimal(einkauf), default_ust_satz)
             j.differenz_eintraege.append((s.product_id or s.id, marge))
             j.differenz_ust += marge.ust_betrag
+            j.differenz_netto += marge.netto_marge   # geht in die 19%-Bemessungsgrundlage
             # § 25a-Ware ist aus der OSS-Schwelle ausdruecklich ausgenommen.
         else:
             satz = default_ust_satz
@@ -75,6 +78,7 @@ def journalisiere_verkaeufe(
             ust = _round(verkauf - netto)
             key = str(satz)
             j.regel_ust_je_satz[key] = j.regel_ust_je_satz.get(key, Decimal("0")) + ust
+            j.regel_netto_je_satz[key] = j.regel_netto_je_satz.get(key, Decimal("0")) + netto
             # EU-B2C-Fernverkauf (Regelware) zaehlt zur 10.000-EUR-OSS-Schwelle.
             if not s.customer_is_business and ist_eu_b2c_fernverkauf(s.customer_country):
                 j.oss_netto_eu_b2c += netto
@@ -84,4 +88,6 @@ def journalisiere_verkaeufe(
     j.deemed_supplier_ust = _round(j.deemed_supplier_ust)
     j.umsatz_brutto = _round(j.umsatz_brutto)
     j.oss_netto_eu_b2c = _round(j.oss_netto_eu_b2c)
+    j.regel_netto_je_satz = {k: _round(v) for k, v in j.regel_netto_je_satz.items()}
+    j.differenz_netto = _round(j.differenz_netto)
     return j

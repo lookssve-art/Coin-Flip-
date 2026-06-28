@@ -218,7 +218,10 @@ Erzeugt jederzeit: Umsatzübersicht (Monat/Jahr), **USt-VA-Vorbereitung** (Zahll
 | 6 — Lexware-Export (Draft-Voucher, Rate-Limit-Backoff) | ✅ | `src/export/lexware.py` |
 | 6 — Lexware-Push (Belege → Draft-Vouchers, live) | ✅ | `src/integrations/lexware_sync.py` |
 | 6 — DATEV-/CSV-Journal (offline) | ✅ | `src/export/datev_csv.py` |
-| 7 — USt-VA-/EÜR-Vorbereitung | ✅ (USt-VA) | `src/tax/ustva.py` |
+| 7 — USt-VA-Vorbereitung | ✅ | `src/tax/ustva.py` |
+| 7 — USt-VA-Kennzahlen-Export (Kz 81/86/66/83, ELSTER-Format) | ✅ | `src/tax/ustva_export.py` |
+| 7 — EÜR-Übersicht (Einnahmen/Ausgaben je Kategorie) | ✅ | `src/tax/euer.py` |
+| Duden-Wissensbasis erweitert (27 Themen A–Z) | ✅ | `src/wissen/duden.py` |
 | 7 — Schwellen-Monitoring 25k/100k/10k | ✅ | `src/tax/schwellen.py` |
 | 7 — Auto-Verfahrensdokumentation | ✅ | `src/verfahrensdoku/generator.py` |
 | 7 — Telegram-Freigabe-/Review-Interface | ✅ | `src/interface/telegram_bot.py` |

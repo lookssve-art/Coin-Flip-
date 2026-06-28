@@ -137,7 +137,9 @@ class TelegramBot:
             f"eBay-Verkaeufe: {s.get('verkaeufe')}\n"
             f"§25a-USt aus Marge: {s.get('differenz_ust')} EUR\n"
             f"{ust}\n"
-            f"Offene Freigaben: {s.get('review_offen')}\n\n"
+            + (f"EÜR: Einnahmen {s.get('euer_einnahmen')} − Ausgaben {s.get('euer_ausgaben')} "
+               f"= Gewinn {s.get('euer_gewinn')} EUR\n" if s.get('euer_gewinn') is not None else "")
+            + f"Offene Freigaben: {s.get('review_offen')}\n\n"
             + self._schwellen_text(s))
 
     def _cmd_schwellen(self) -> str:

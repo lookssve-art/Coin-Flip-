@@ -484,12 +484,35 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     else:
         print(f"  USt-VA (Entwurf): Zahllast {report.zahllast} EUR.")
 
+    # USt-VA-Kennzahlen-Entwurf (Kz 81/86/66/83) als CSV.
+    from src.tax import ustva_kennzahlen, schreibe_ustva_csv, euer_uebersicht, schreibe_euer_csv
+    netto_19 = journal.regel_netto_je_satz.get("19", Decimal("0")) + journal.differenz_netto
+    netto_7 = journal.regel_netto_je_satz.get("7", Decimal("0"))
+    kz = ustva_kennzahlen("laufend", kleinunternehmer=ku, netto_19=netto_19,
+                          netto_7=netto_7, vorsteuer=Decimal("0"))
+    schreibe_ustva_csv("data/ustva_kennzahlen.csv", kz)
+    if not ku:
+        print(f"  USt-VA-Kz: 81={kz.kennzahlen['81']} 86={kz.kennzahlen['86']} "
+              f"66={kz.kennzahlen['66']} 83={kz.kennzahlen['83']} (data/ustva_kennzahlen.csv).")
+
+    # EÜR-Übersicht (Einnahmen/Ausgaben je Kategorie).
+    euer = euer_uebersicht(sales, receipts, kleinunternehmer=ku, zeitraum="laufend",
+                           gewst_freibetrag=Decimal(str(sch.get("gewerbesteuer_freibetrag_eur", 24500))))
+    schreibe_euer_csv("data/euer_uebersicht.csv", euer)
+    print(f"  EÜR: Einnahmen {euer.einnahmen_gesamt} - Ausgaben {euer.ausgaben_gesamt} "
+          f"= Gewinn {euer.gewinn} EUR (data/euer_uebersicht.csv).")
+    if euer.ueber_gewst_freibetrag:
+        queue.add("Gewinn ueber Gewerbesteuer-Freibetrag (24.500 EUR)", bezug="gewst")
+
     # Dashboard-Snapshot fuer den Telegram-Bot (/report, /schwellen).
     import json
     snapshot = {
         "belege": len(receipts), "banktransaktionen": len(txs), "verkaeufe": len(sales),
         "differenz_ust": str(journal.differenz_ust),
         "ustva_zahllast": (None if ku else str(report.zahllast)),
+        "euer_gewinn": str(euer.gewinn),
+        "euer_einnahmen": str(euer.einnahmen_gesamt),
+        "euer_ausgaben": str(euer.ausgaben_gesamt),
         "kleinunternehmer": ku,
         "review_offen": len(queue.offen()),
         "schwellen": {

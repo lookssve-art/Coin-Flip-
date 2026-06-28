@@ -164,6 +164,17 @@ Trennung privat/geschäftlich). Modul: [`src/util/datum.py`](src/util/datum.py).
 **OSS-Fernverkauf-Schwelle** (10.000 € EU-B2C netto, **§ 25a-Ware ausgenommen**) und legt
 bei Annäherung/Überschreitung einen Review-Fall an.
 
+### USt-VA-Kennzahlen + EÜR-Übersicht
+
+`sync` schreibt zwei Abgabe-Vorbereitungs-Entwürfe:
+- **USt-VA-Kennzahlen** (`data/ustva_kennzahlen.csv`, [`src/tax/ustva_export.py`](src/tax/ustva_export.py))
+  im ELSTER-Format: **Kz 81** (Umsätze 19 %), **Kz 86** (7 %), **Kz 66** (Vorsteuer),
+  **Kz 83** (Zahllast). Die § 25a-Netto-Marge fließt in Kz 81; bei Kleinunternehmern
+  entfällt die USt-VA (wird vermerkt).
+- **EÜR-Übersicht** (`data/euer_uebersicht.csv`, [`src/tax/euer.py`](src/tax/euer.py)):
+  Einnahmen − Ausgaben je Kategorie = Gewinn, mit Gewerbesteuer-Freibetrag-Hinweis
+  (24.500 €). Beides **Entwürfe** — die ELSTER-Abgabe bleibt dein Schritt.
+
 ## Telegram-„Duden" (Wissensbasis A–Z)
 
 Der Bot beantwortet Fragen zu allen relevanten Regeln per `/duden <frage>` —

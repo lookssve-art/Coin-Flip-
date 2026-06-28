@@ -178,6 +178,88 @@ EINTRAEGE: list[Eintrag] = [
         "(Doppelversteuerung vermeiden).",
         "§ 3 Abs. 3a UStG",
     ),
+    Eintrag(
+        "Rechnungspflichtangaben",
+        ("rechnung", "pflichtangaben", "rechnungsangaben", "was muss auf die rechnung"),
+        "Pflichtangaben einer Rechnung: vollstaendiger Name + Anschrift von Leistendem und "
+        "Empfaenger, Steuernummer oder USt-IdNr, Ausstellungsdatum, fortlaufende "
+        "Rechnungsnummer, Menge/Art der Leistung, Liefer-/Leistungsdatum, Entgelt nach "
+        "Steuersaetzen aufgeschluesselt, Steuersatz + Steuerbetrag (bzw. Hinweis auf "
+        "Steuerbefreiung). Kleinunternehmer: Hinweis 'Kein Steuerausweis wegen § 19 UStG'.",
+        "§ 14 Abs. 4 UStG",
+    ),
+    Eintrag(
+        "Kleinbetragsrechnung",
+        ("kleinbetragsrechnung", "250 euro", "kleinbetrag", "quittung", "bon"),
+        "Bis 250 EUR brutto genuegen vereinfachte Angaben: Name + Anschrift des Leistenden, "
+        "Ausstellungsdatum, Menge/Art, Entgelt + Steuerbetrag in einer Summe, Steuersatz. "
+        "Keine Rechnungsnummer/Empfaengerangaben noetig. Von der E-Rechnungspflicht ausgenommen.",
+        "§ 33 UStDV",
+    ),
+    Eintrag(
+        "Betriebsausgaben",
+        ("betriebsausgaben", "absetzen", "abziehbar", "ausgaben"),
+        "Aufwendungen, die durch den Betrieb veranlasst sind, mindern den Gewinn. Gemischt "
+        "privat/betrieblich -> aufteilen. Nicht/teilweise abziehbar: u. a. Geschenke > 50 EUR/"
+        "Empfaenger, Bewirtung nur zu 70 %, private Anteile. Belegnachweis erforderlich.",
+        "§ 4 Abs. 4, Abs. 5 EStG",
+    ),
+    Eintrag(
+        "AfA / Abschreibung",
+        ("afa", "abschreibung", "anlagevermoegen", "nutzungsdauer"),
+        "Wirtschaftsgueter ueber 800 EUR netto werden ueber die betriebsgewoehnliche "
+        "Nutzungsdauer abgeschrieben (lineare AfA), nicht sofort voll als Ausgabe gebucht. "
+        "Maszgeblich sind die amtlichen AfA-Tabellen.",
+        "§ 7 EStG",
+    ),
+    Eintrag(
+        "GWG",
+        ("gwg", "geringwertige wirtschaftsgueter", "800 euro", "sofortabschreibung"),
+        "Geringwertige Wirtschaftsgueter bis 800 EUR netto koennen im Anschaffungsjahr sofort "
+        "voll als Betriebsausgabe abgesetzt werden (statt AfA ueber Jahre). Alternativ "
+        "Sammelposten/Poolabschreibung.",
+        "§ 6 Abs. 2 EStG",
+    ),
+    Eintrag(
+        "Ist- vs. Soll-Versteuerung",
+        ("ist-versteuerung", "soll-versteuerung", "istversteuerung", "vereinnahmte entgelte"),
+        "Soll-Versteuerung (Regel): USt entsteht mit Leistungserbringung (Rechnungsdatum). "
+        "Ist-Versteuerung (auf Antrag, u. a. bis 800.000 EUR Vorjahresumsatz): USt entsteht "
+        "erst mit Zahlungseingang — schont die Liquiditaet. Passt zur EUR (Zufluss/Abfluss).",
+        "§ 13, § 20 UStG",
+    ),
+    Eintrag(
+        "Storno / Refund buchen",
+        ("storno", "refund", "erstattung", "ruecksendung", "chargeback", "gutschrift buchen"),
+        "Eine Erstattung/Ruecksendung mindert den urspruenglichen Umsatz (und die USt) im "
+        "Zeitpunkt der Rueckzahlung. Differenzbesteuerung: die Marge des stornierten Verkaufs "
+        "entfaellt. Chargebacks gegen den Zahlungsdienst-/Bankbeleg abgleichen.",
+        "§ 17 UStG",
+    ),
+    Eintrag(
+        "Privatentnahme",
+        ("privatentnahme", "entnahme", "eigenverbrauch", "privat genutzt"),
+        "Wird ein betriebliches Wirtschaftsgut/Geld privat entnommen, ist das als "
+        "Privatentnahme zu erfassen (kein Betriebsaufwand). Bei USt-Pflichtigen kann eine "
+        "unentgeltliche Wertabgabe USt ausloesen.",
+        "§ 4 Abs. 1, § 6 Abs. 1 Nr. 4 EStG",
+    ),
+    Eintrag(
+        "Inventur / Warenbestand",
+        ("inventur", "bestand", "warenbestand", "lager", "vorrat"),
+        "Bei der EUR ist grundsaetzlich keine Inventur noetig (Wareneinkauf ist im "
+        "Zahlungsjahr Betriebsausgabe). Dennoch ist eine Bestandsuebersicht sinnvoll — und "
+        "fuer die Differenzbesteuerung sind artikelgenaue Einkaufspreise ohnehin Pflicht.",
+        "§ 4 Abs. 3 EStG",
+    ),
+    Eintrag(
+        "Steuernummer vs. USt-IdNr",
+        ("steuernummer", "stnr", "unterschied steuernummer ust-idnr"),
+        "Die Steuernummer vergibt das Finanzamt fuer die Einkommen-/Umsatzsteuer im Inland. "
+        "Die USt-IdNr (BZSt) ist fuer den EU-grenzueberschreitenden Verkehr (B2B, OSS, eBay-EU). "
+        "Auf Rechnungen genuegt eine der beiden.",
+        "§ 14 Abs. 4, § 27a UStG",
+    ),
 ]
 
 
