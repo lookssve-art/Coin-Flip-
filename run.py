@@ -434,13 +434,19 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     from src.reconciliation import Reconciler, MatchStatus
     from src.export import schreibe_buchungsjournal, schreibe_differenz_journal
     from src.tax import ustva_vorbereitung, journalisiere_verkaeufe
-    if not belege_dir or not csv_path:
-        print("Verwendung: python run.py sync <belege_dir> <bank_csv>")
-        return 2
     from src.util import ab_geschaeftsbeginn
+    # Pfade aus der Konfiguration uebernehmen, fehlende Quellen tolerieren:
+    # so rechnet sync auch nur mit eBay-Daten (ohne Belege/Konto-CSV).
+    belege_dir = belege_dir or config.get("pfade", {}).get("belege_inbox", "")
+    csv_path = csv_path or config.get("pfade", {}).get("bank_csv", "")
     try:
-        receipts, queue = _ocr_belege(config, belege_dir)
-        txs = _bank_transaktionen(config, csv_path)
+        queue = _review_queue(config)
+        receipts = []
+        if belege_dir and os.path.isdir(belege_dir):
+            receipts, queue = _ocr_belege(config, belege_dir)
+        txs = []
+        if csv_path and os.path.exists(csv_path):
+            txs = _bank_transaktionen(config, csv_path)
         sales = _ebay_verkaeufe(config)
     except Exception as exc:  # noqa: BLE001
         print(f"Sync fehlgeschlagen: {exc}")
@@ -736,6 +742,46 @@ def cmd_gewinn(config: dict, bank_csv: str = "") -> int:
     return 0
 
 
+def _ebay_access_token(config: dict):
+    """Frischen eBay-Access-Token holen (Refresh bevorzugt, sonst direkt hinterlegt)."""
+    from src.integrations import EbayOAuth
+    e = config.get("integrationen", {}).get("ebay", {})
+    if e.get("refresh_token") and e.get("app_id") and e.get("cert_id"):
+        try:
+            oauth = EbayOAuth(app_id=e["app_id"], cert_id=e["cert_id"],
+                              environment=e.get("environment", "production"))
+            return oauth.refresh(e["refresh_token"]).access_token, e
+        except Exception as exc:  # noqa: BLE001
+            print(f"Token-Refresh fehlgeschlagen: {exc}")
+    return e.get("access_token"), e
+
+
+def cmd_ebay_verkaeufe_api(config: dict, tage: str = "90") -> int:
+    """Holt die eBay-Verkaeufe der letzten ~90 Tage via Trading-API (ohne Signatur)
+    und schreibt sie nach data/ebay_rows.json (fuer sync)."""
+    import json
+    from src.integrations import EbayTradingClient
+    access_token, e = _ebay_access_token(config)
+    if not access_token:
+        print("Kein eBay-Token. Zuerst `ebay-auth` + `ebay-token` ausfuehren.")
+        return 2
+    try:
+        client = EbayTradingClient(access_token=access_token,
+                                   environment=e.get("environment", "production"),
+                                   site_id=("77" if e.get("marketplace_id", "EBAY_DE") == "EBAY_DE" else "0"))
+        rows = client.get_seller_sales(tage=int(tage),
+                                       default_tax_scheme=e.get("default_tax_scheme", "differenz"))
+    except Exception as exc:  # noqa: BLE001
+        print(f"Trading-API GetOrders (Verkaeufe) fehlgeschlagen: {exc}")
+        return 1
+    pfad = config.get("pfade", {}).get("ebay_export", "data/ebay_rows.json")
+    os.makedirs(os.path.dirname(pfad) or ".", exist_ok=True)
+    with open(pfad, "w", encoding="utf-8") as fh:
+        json.dump(rows, fh, ensure_ascii=False, indent=2)
+    print(f"Trading-API: {len(rows)} Verkaufspositionen (letzte {min(int(tage), 90)} Tage) -> {pfad}.")
+    return 0
+
+
 def cmd_ebay_kaeufe_api(config: dict, tage: str = "90") -> int:
     """Holt die eBay-Kaeufe der letzten ~90 Tage live (Trading-API) und merged sie
     in data/ebay_kaeufe.json. Aeltere Kaeufe (Altbestand) brauchen den Website-Export."""
@@ -802,28 +848,26 @@ def cmd_run_all(config: dict) -> int:
     betrieb = config.get("betrieb", {})
     ebay = config.get("integrationen", {}).get("ebay", {})
 
-    # 1a) Neue eBay-Kaeufe live holen (~90 Tage), wenn ein Token vorhanden ist.
-    if ebay.get("refresh_token") or ebay.get("access_token"):
-        _schritt("eBay-Kaeufe (Trading-API, letzte ~90 Tage)",
-                 lambda: cmd_ebay_kaeufe_api(config))
+    tage = str(betrieb.get("ebay_sync_tage", 30))
+    hat_token = bool(ebay.get("refresh_token") or ebay.get("access_token"))
+
+    # 1a) Neue eBay-Kaeufe live holen (Trading-API, keine Signatur noetig).
+    if hat_token:
+        _schritt("eBay-Kaeufe (Trading-API)", lambda: cmd_ebay_kaeufe_api(config, tage))
 
     # 1b) Kaufhistorie -> Einkaufspreise (nur wenn Export vorhanden).
     if os.path.exists(pfade.get("ebay_kaeufe_export", "")):
         _schritt("eBay-Kaeufe -> Einkaufspreise", lambda: cmd_ebay_kaeufe(config))
 
-    # 2) eBay-Verkaeufe abrufen (Refresh- oder Access-Token genuegt, kein RuName noetig).
-    if ebay.get("refresh_token") or ebay.get("access_token"):
-        _schritt("eBay-Verkaufssync",
-                 lambda: cmd_ebay_sync(config, str(betrieb.get("ebay_sync_tage", 30))))
+    # 2) eBay-Verkaeufe abrufen (Trading-API; Finances braucht Signaturen, daher nicht).
+    if hat_token:
+        _schritt("eBay-Verkaeufe (Trading-API)",
+                 lambda: cmd_ebay_verkaeufe_api(config, tage))
 
-    # 3) End-to-End-Verbuchung (nur wenn Inbox + Konto-CSV vorhanden).
-    belege = pfade.get("belege_inbox", "")
-    bank = pfade.get("bank_csv", "")
-    if os.path.isdir(belege) and os.path.exists(bank):
-        _schritt("Sync (Reconciliation + Journale + Schwellen)",
-                 lambda: cmd_sync(config, belege, bank))
-    else:
-        print(f"\n▶ Sync uebersprungen: Inbox ({belege}) oder Konto-CSV ({bank}) fehlt.")
+    # 3) Auswertung — rechnet mit allem, was da ist (eBay-Verkaeufe genuegen;
+    #    Belege/Konto-CSV werden einbezogen, wenn vorhanden).
+    _schritt("Auswertung (§25a, USt-VA, EÜR, Schwellen, Reconciliation)",
+             lambda: cmd_sync(config))
 
     log.append("run_all.ende", {})
     print("\n✓ run-all abgeschlossen.")
@@ -871,6 +915,7 @@ COMMANDS = {
     "ebay-sync": cmd_ebay_sync,
     "ebay-kaeufe": cmd_ebay_kaeufe,
     "ebay-kaeufe-api": cmd_ebay_kaeufe_api,
+    "ebay-verkaeufe-api": cmd_ebay_verkaeufe_api,
     "lexware-ping": cmd_lexware_ping,
     "bank-import": cmd_bank_import,
     "sync": cmd_sync,

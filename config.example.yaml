@@ -82,6 +82,7 @@ integrationen:
     marketplace_id: "EBAY_DE"
     refresh_token: ""                    # dauerhaft (~18 Monate); via `ebay-token <code>`
     access_token: ""                     # optional: kurzlebiger User-Token (~2h) als Fallback
+    default_tax_scheme: "differenz"      # Verkaeufe per Default § 25a (Sammelware); sonst "regel"
   bank:
     provider: "lexware_csv"              # Lexware Office = Geschaeftskonto -> CSV-Export
     csv_mapping: {}                      # optional: {date: "...", amount: "...", text: "..."}

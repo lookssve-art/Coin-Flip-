@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.integrations import EbayTradingClient, parse_buyer_orders
+from src.integrations import EbayTradingClient, parse_buyer_orders, parse_seller_orders
 
 _XML = """<?xml version="1.0" encoding="UTF-8"?>
 <GetOrdersResponse xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -42,6 +42,47 @@ class TestParseBuyerOrders(unittest.TestCase):
 
     def test_kaputtes_xml_leer(self):
         self.assertEqual(parse_buyer_orders("<nope"), [])
+
+
+_SELLER_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<GetOrdersResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+  <OrderArray>
+    <Order>
+      <OrderID>ORD-1</OrderID>
+      <CreatedTime>2026-06-12T09:00:00.000Z</CreatedTime>
+      <ShippingAddress><Country>FR</Country></ShippingAddress>
+      <TransactionArray>
+        <Transaction>
+          <TransactionID>T1</TransactionID>
+          <Item><ItemID>999</ItemID><SKU>CHARIZARD-PSA10</SKU></Item>
+          <TransactionPrice currencyID="EUR">120.00</TransactionPrice>
+          <QuantityPurchased>1</QuantityPurchased>
+        </Transaction>
+      </TransactionArray>
+    </Order>
+  </OrderArray>
+</GetOrdersResponse>"""
+
+
+class TestParseSellerOrders(unittest.TestCase):
+    def test_verkaufszeilen(self):
+        from decimal import Decimal
+        from src.imports import importiere_ebay_verkaeufe
+        rows = parse_seller_orders(_SELLER_XML, default_tax_scheme="differenz")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["product_id"], "CHARIZARD-PSA10")
+        self.assertEqual(rows[0]["gross"], "120.00")
+        self.assertEqual(rows[0]["buyer_country"], "FR")
+        self.assertEqual(rows[0]["tax_scheme"], "differenz")
+        # geht sauber durch den Importer
+        sales = importiere_ebay_verkaeufe(rows)
+        self.assertEqual(sales[0].brutto, Decimal("120.00"))
+        self.assertEqual(sales[0].customer_country, "FR")
+
+    def test_menge_multipliziert(self):
+        xml = _SELLER_XML.replace("<QuantityPurchased>1", "<QuantityPurchased>3")
+        rows = parse_seller_orders(xml)
+        self.assertEqual(rows[0]["gross"], "360.00")
 
 
 class TestTradingClient(unittest.TestCase):

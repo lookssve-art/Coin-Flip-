@@ -42,6 +42,81 @@ def _find(el, name):
     return None
 
 
+def _order_country(order) -> str:
+    """Liefert das Lieferland des Kaeufers (fuer OSS-Einordnung)."""
+    for sub in order.iter():
+        if _local(sub.tag) in ("ShippingAddress", "Address"):
+            c = _find(sub, "Country")
+            if c is not None and c.text:
+                return c.text.strip().upper()
+    return "DE"
+
+
+def parse_seller_orders(xml: str, *, default_tax_scheme: str = "differenz") -> list[dict]:
+    """Extrahiert Verkaufszeilen aus einer GetOrders-Antwort (OrderRole=Seller).
+
+    Rueckgabe: Liste von Zeilen kompatibel mit ``importiere_ebay_verkaeufe``
+    ({id, date, gross, fees, product_id, buyer_country, tax_scheme}). Gebuehren
+    sind 0 (die liefert nur die Finances-API); product_id = SKU bzw. ItemID.
+    """
+    rows: list[dict] = []
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError:
+        return rows
+    for order in root.iter():
+        if _local(order.tag) != "Order":
+            continue
+        created = _find(order, "CreatedTime")
+        datum = (created.text[:10] if created is not None and created.text else None)
+        land = _order_country(order)
+        for trans in order.iter():
+            if _local(trans.tag) != "Transaction":
+                continue
+            item = _find(trans, "Item")
+            item_id = _find(item, "ItemID") if item is not None else None
+            sku = _find(item, "SKU") if item is not None else None
+            preis = _find(trans, "TransactionPrice")
+            menge = _find(trans, "QuantityPurchased")
+            pid = None
+            if sku is not None and sku.text:
+                pid = sku.text.strip()
+            elif item_id is not None and item_id.text:
+                pid = item_id.text.strip()
+            einzel = _to_decimal_str(preis.text if preis is not None else None)
+            anzahl = 1
+            if menge is not None and menge.text and menge.text.strip().isdigit():
+                anzahl = int(menge.text.strip())
+            gross = _mul(einzel, anzahl)
+            trans_id = _find(trans, "TransactionID")
+            order_id = _find(order, "OrderID")
+            rows.append({
+                "id": (trans_id.text.strip() if trans_id is not None and trans_id.text
+                       else (order_id.text.strip() if order_id is not None and order_id.text else "")),
+                "date": datum,
+                "gross": gross,
+                "fees": "0",
+                "product_id": pid,
+                "buyer_country": land,
+                "tax_scheme": default_tax_scheme,
+            })
+    return rows
+
+
+def _to_decimal_str(value) -> str:
+    if value is None:
+        return "0"
+    return str(value).strip().replace(",", ".")
+
+
+def _mul(preis_str: str, anzahl: int) -> str:
+    from decimal import Decimal
+    try:
+        return str((Decimal(preis_str) * anzahl).quantize(Decimal("0.01")))
+    except Exception:  # noqa: BLE001
+        return preis_str
+
+
 def parse_buyer_orders(xml: str) -> list[dict]:
     """Extrahiert Kaufzeilen aus einer GetOrders-Antwort (OrderRole=Buyer).
 
@@ -118,3 +193,27 @@ class EbayTradingClient:
     def get_buyer_purchases(self, *, tage: int = 90) -> list[dict]:
         """Holt die Kaeufe der letzten ``tage`` und gibt normalisierte Zeilen zurueck."""
         return parse_buyer_orders(self.get_buyer_orders_xml(tage=tage))
+
+    def get_orders_xml(self, *, role: str, tage: int = 90, seite: int = 1) -> str:
+        """Roh-XML der GetOrders-Antwort fuer ``role`` ('Buyer' oder 'Seller')."""
+        tage = min(max(tage, 1), 90)
+        ende = datetime.utcnow()
+        start = ende - timedelta(days=tage)
+        body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            f'<GetOrdersRequest xmlns="{_NS}">'
+            f'<OrderRole>{role}</OrderRole>'
+            '<OrderStatus>Completed</OrderStatus>'
+            f'<CreateTimeFrom>{start.strftime("%Y-%m-%dT%H:%M:%S.000Z")}</CreateTimeFrom>'
+            f'<CreateTimeTo>{ende.strftime("%Y-%m-%dT%H:%M:%S.000Z")}</CreateTimeTo>'
+            f'<Pagination><EntriesPerPage>100</EntriesPerPage><PageNumber>{seite}</PageNumber></Pagination>'
+            '</GetOrdersRequest>'
+        ).encode("utf-8")
+        return self._sender(_TRADING_URL[self.environment], method="POST",
+                            body=body, headers=self._headers("GetOrders"))
+
+    def get_seller_sales(self, *, tage: int = 90,
+                         default_tax_scheme: str = "differenz") -> list[dict]:
+        """Holt die Verkaeufe der letzten ``tage`` als normalisierte Zeilen."""
+        xml = self.get_orders_xml(role="Seller", tage=tage)
+        return parse_seller_orders(xml, default_tax_scheme=default_tax_scheme)
