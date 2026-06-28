@@ -16,6 +16,11 @@ data/
 belege/
 audit/*.jsonl
 
+# Autonomer Betrieb: Eingangsdaten + Logs
+inbox/
+log/
+deploy/inbox/
+
 # OS / IDE
 .DS_Store
 .idea/

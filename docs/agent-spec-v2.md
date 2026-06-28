@@ -225,6 +225,8 @@ Erzeugt jederzeit: Umsatzübersicht (Monat/Jahr), **USt-VA-Vorbereitung** (Zahll
 | 7 — Telegram-„Duden" (Wissensbasis A–Z, optional Claude) | ✅ | `src/wissen/duden.py` |
 | Geschäftsbeginn-Cutoff (Daten ab Gründung) | ✅ | `src/util/datum.py` |
 | eBay-Käufe → Einkaufspreise (§ 25a) | ✅ | `src/integrations/ebay_purchases.py` |
+| Autonomer Remote-Betrieb (`run-all` / `serve`) | ✅ | `run.py`, `deploy/` |
+| Deployment (Docker / systemd / Cron) | ✅ | `deploy/Dockerfile`, `deploy/docker-compose.yml`, `deploy/sero-agent.service` |
 
 Priorisiert wurde — wie in der Spezifikation gefordert — das **Compliance-Fundament**
 (Punkte 1, 5, 7-Doku) vor den Komfort-/Integrationsfeatures (2, 3-OCR, 6).

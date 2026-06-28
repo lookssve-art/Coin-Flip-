@@ -1,0 +1,31 @@
+# Autonomer Remote-Betrieb des SERO Accounting Agent.
+#   docker compose -f deploy/docker-compose.yml up -d
+#
+# config.yaml (mit Secrets) und die Datenverzeichnisse werden als Volumes
+# eingehaengt — niemals ins Image backen.
+services:
+  sero-agent:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: sero-accounting-agent:latest
+    container_name: sero-agent
+    restart: unless-stopped
+    command: ["python", "run.py", "serve"]
+    volumes:
+      - ../config.yaml:/app/config.yaml:ro     # Secrets read-only einhaengen
+      - sero-audit:/app/audit                  # append-only Audit-Log (persistent)
+      - sero-belege:/app/belege                # WORM-Belegspeicher (persistent)
+      - sero-data:/app/data                    # Journale / Zwischendaten
+      - ./inbox:/app/inbox                      # Belege + Konto-CSV hier ablegen
+    # Healthcheck: Audit-Hashkette muss intakt bleiben.
+    healthcheck:
+      test: ["CMD", "python", "run.py", "audit-verify"]
+      interval: 1h
+      timeout: 30s
+      retries: 3
+
+volumes:
+  sero-audit:
+  sero-belege:
+  sero-data:

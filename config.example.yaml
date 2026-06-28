@@ -41,8 +41,15 @@ pfade:
   audit_log: "audit/audit_log.jsonl"     # append-only, hash-verkettet
   belegspeicher: "belege/"               # WORM / versioniert
   verfahrensdoku: "docs/verfahrensdokumentation.md"
-  ebay_export: "data/ebay_rows.json"     # optional: eBay-Verkaufszeilen (JSON) fuer sync
-  einkaufspreise: "data/einkaufspreise.json"  # optional: {product_id: preis} fuer § 25a
+  ebay_export: "data/ebay_rows.json"     # eBay-Verkaufszeilen (von ebay-sync befuellt)
+  ebay_kaeufe_export: "data/ebay_kaeufe.json"  # eBay-Kaufhistorie (Bestellverlauf-Export)
+  einkaufspreise: "data/einkaufspreise.json"  # {product_id: preis} fuer § 25a
+  belege_inbox: "inbox/belege/"          # autonomer Betrieb: Belege hier ablegen
+  bank_csv: "inbox/kontoumsaetze.csv"    # autonomer Betrieb: Lexware-Konto-CSV
+
+betrieb:
+  pipeline_intervall_stunden: 6          # `serve`: Pipeline-Takt
+  ebay_sync_tage: 30                     # Zeitfenster fuer ebay-sync
 
 # --- Integrationen ---
 # WICHTIG: echte Keys NUR in config.yaml (gitignored) eintragen, nie hier.

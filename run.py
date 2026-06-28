@@ -19,6 +19,8 @@ Verwendung:
     python run.py bank-import <csv>    # Lexware-Geschaeftskonto-CSV importieren
     python run.py lexware-push <dir>   # Belege aus <dir> als Draft-Vouchers nach Lexware
     python run.py sync <belege> <csv>  # End-to-End: Belege+Bank -> Reconciliation -> Journal
+    python run.py run-all               # Voller Pipeline-Durchlauf (kaeufe->sync->verbuchung)
+    python run.py serve                 # Autonomer Dauerbetrieb: Bot + Pipeline im Takt
 """
 
 from __future__ import annotations
@@ -473,6 +475,79 @@ def cmd_lexware_push(config: dict, belege_dir: str = "") -> int:
     return 0 if not res.fehler else 1
 
 
+def _schritt(name: str, fn) -> bool:
+    """Fuehrt einen Pipeline-Schritt robust aus (Fehler brechen den Lauf nicht ab)."""
+    print(f"\n▶ {name}")
+    try:
+        fn()
+        return True
+    except Exception as exc:  # noqa: BLE001 - autonomer Lauf darf nicht crashen
+        print(f"  ⚠ {name} uebersprungen/fehlgeschlagen: {exc}")
+        return False
+
+
+def cmd_run_all(config: dict) -> int:
+    """Ein vollstaendiger Pipeline-Durchlauf — fuer Cron/Server. Jeder Schritt guarded."""
+    from src.audit import AuditLog
+    log = AuditLog(config["pfade"]["audit_log"])
+    log.append("run_all.start", {})
+    pfade = config.get("pfade", {})
+    betrieb = config.get("betrieb", {})
+    ebay = config.get("integrationen", {}).get("ebay", {})
+
+    # 1) eBay-Kaeufe -> Einkaufspreise (nur wenn Export vorhanden).
+    if os.path.exists(pfade.get("ebay_kaeufe_export", "")):
+        _schritt("eBay-Kaeufe -> Einkaufspreise", lambda: cmd_ebay_kaeufe(config))
+
+    # 2) eBay-Verkaeufe abrufen (nur wenn OAuth vollstaendig konfiguriert).
+    if ebay.get("ru_name") and ebay.get("refresh_token"):
+        _schritt("eBay-Verkaufssync",
+                 lambda: cmd_ebay_sync(config, str(betrieb.get("ebay_sync_tage", 30))))
+
+    # 3) End-to-End-Verbuchung (nur wenn Inbox + Konto-CSV vorhanden).
+    belege = pfade.get("belege_inbox", "")
+    bank = pfade.get("bank_csv", "")
+    if os.path.isdir(belege) and os.path.exists(bank):
+        _schritt("Sync (Reconciliation + Journale + Schwellen)",
+                 lambda: cmd_sync(config, belege, bank))
+    else:
+        print(f"\n▶ Sync uebersprungen: Inbox ({belege}) oder Konto-CSV ({bank}) fehlt.")
+
+    log.append("run_all.ende", {})
+    print("\n✓ run-all abgeschlossen.")
+    return 0
+
+
+def cmd_serve(config: dict, intervall_stunden: str = "") -> int:
+    """Autonomer Dauerbetrieb: Telegram-Bot (Thread) + Pipeline im festen Takt."""
+    import threading
+    import time
+    betrieb = config.get("betrieb", {})
+    intervall = float(intervall_stunden or betrieb.get("pipeline_intervall_stunden", 6))
+
+    tg = config.get("interface", {}).get("telegram", {})
+    if tg.get("token") and tg.get("allowed_user_ids"):
+        t = threading.Thread(target=cmd_telegram, args=(config,), daemon=True)
+        t.start()
+        print(f"Telegram-Bot gestartet (Thread). Pipeline-Takt: alle {intervall} h.")
+    else:
+        print(f"Telegram-Bot inaktiv (Token/Allowlist fehlt). Pipeline-Takt: alle {intervall} h.")
+
+    while True:
+        try:
+            cmd_run_all(config)
+        except KeyboardInterrupt:
+            print("\nserve beendet.")
+            return 0
+        except Exception as exc:  # noqa: BLE001
+            print(f"Pipeline-Fehler: {exc}")
+        try:
+            time.sleep(max(intervall, 0.1) * 3600)
+        except KeyboardInterrupt:
+            print("\nserve beendet.")
+            return 0
+
+
 COMMANDS = {
     "demo": cmd_demo,
     "verfahrensdoku": cmd_verfahrensdoku,
@@ -487,6 +562,8 @@ COMMANDS = {
     "bank-import": cmd_bank_import,
     "sync": cmd_sync,
     "lexware-push": cmd_lexware_push,
+    "run-all": cmd_run_all,
+    "serve": cmd_serve,
 }
 
 

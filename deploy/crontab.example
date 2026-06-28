@@ -1,0 +1,11 @@
+# Alternative zum Dauerbetrieb: Pipeline per Cron, Bot separat (oder gar nicht).
+# Installation:  crontab -e  und Zeilen uebernehmen (Pfade anpassen).
+
+# Voller Pipeline-Durchlauf alle 6 Stunden (kaeufe -> verkaufssync -> verbuchung).
+0 */6 * * *  cd /opt/sero-agent && .venv/bin/python run.py run-all >> log/run-all.log 2>&1
+
+# Audit-Hashkette taeglich pruefen (GoBD-Integritaet).
+30 3 * * *   cd /opt/sero-agent && .venv/bin/python run.py audit-verify >> log/audit.log 2>&1
+
+# Telegram-Bot laeuft dauerhaft (besser via systemd; hier nur als Beispiel @reboot):
+@reboot      cd /opt/sero-agent && .venv/bin/python run.py telegram >> log/telegram.log 2>&1

@@ -1,0 +1,25 @@
+# systemd-Unit fuer den autonomen Betrieb ohne Docker.
+# Installation:
+#   sudo cp deploy/sero-agent.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now sero-agent
+# Logs:  journalctl -u sero-agent -f
+[Unit]
+Description=SERO Accounting & Tax Operations Agent (autonom)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Pfade an deine Installation anpassen:
+WorkingDirectory=/opt/sero-agent
+ExecStart=/opt/sero-agent/.venv/bin/python run.py serve
+Restart=on-failure
+RestartSec=30
+# Haertung
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/sero-agent/audit /opt/sero-agent/belege /opt/sero-agent/data /opt/sero-agent/inbox
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

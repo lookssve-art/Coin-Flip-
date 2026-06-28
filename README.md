@@ -167,6 +167,22 @@ keine Steuerberatung.*
 > Hinweis: `api.lexoffice.io` braucht ausgehenden Zugriff (in dieser Sandbox gesperrt);
 > lokal/auf dem Zielserver ausführen. Logik ist über injizierbares HTTP offline getestet.
 
+## Autonomer Remote-Betrieb
+
+Für den Dauerbetrieb auf einem Server (Bot + Pipeline im Takt, ohne lokales Tippen):
+
+```bash
+python run.py run-all     # ein vollständiger Pipeline-Durchlauf (für Cron)
+python run.py serve       # Dauerbetrieb: Telegram-Bot + Pipeline alle N Stunden
+```
+
+`run-all` führt jeden Schritt nur aus, wenn seine Voraussetzungen (Credentials/
+Inbox/CSV) erfüllt sind — ein fehlender Schritt bricht den Lauf nicht ab. Deployment
+per **Docker / systemd / Cron**: siehe **[`deploy/README.md`](deploy/README.md)**.
+
+> Der einmalige eBay-OAuth-Consent ist ein Browser-Schritt von dir und **nicht**
+> automatisierbar; danach läuft alles autonom über den hinterlegten Refresh-Token.
+
 ## Schnellstart
 
 ```bash
