@@ -51,9 +51,13 @@ integrationen:
     finalize_belege: false               # API legt default Drafts an (Festschreibung = manuell)
   ebay:
     konto_typ: "gewerblich"              # gewerblich | privat
-    app_id: ""                           # OAuth-Client (Production, gewerblich)
-    cert_id: ""
-    refresh_token: ""
+    environment: "production"            # production | sandbox
+    app_id: ""                           # Client ID (Production, gewerblich)
+    dev_id: ""
+    cert_id: ""                          # Client Secret
+    ru_name: ""                          # RuName (Redirect-URL-Name) aus Developer Portal
+    marketplace_id: "EBAY_DE"
+    refresh_token: ""                    # via `python run.py ebay-token <code>` erzeugen
   bank: { provider: "qonto", api_key: "" }   # qonto | finom | aggregator
   ocr: { provider: "textract", region: "eu-central-1" }
   llm:

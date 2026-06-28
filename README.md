@@ -65,6 +65,33 @@ Jede Freigabe wird im Audit-Log protokolliert.
 > abgesicherten CI-/Cloud-Umgebungen ist dieser Host per Egress-Policy gesperrt —
 > dort den Bot lokal bzw. auf dem Zielserver starten.
 
+## eBay-Anbindung (gewerblich, read-only)
+
+OAuth2-Consent-Flow für die Finances-/Fulfillment-APIs (lesen im Namen des Verkäufers).
+App-ID, Cert-ID, Dev-ID und **RuName** (Redirect-URL-Name aus dem eBay Developer
+Portal) gehören in `config.yaml` unter `integrationen.ebay`.
+
+```bash
+python run.py ebay-auth            # gibt die Consent-URL aus → im Browser bestätigen
+python run.py ebay-token <code>    # Code aus der Redirect-URL → Refresh-Token erzeugen
+#   → den ausgegebenen Refresh-Token in config.yaml eintragen
+python run.py ebay-sync 30         # letzte 30 Tage Transaktionen abrufen + importieren
+```
+
+`ebay-sync` ruft die Finances-API ab, normalisiert Verkäufe/Gebühren/Refunds
+([`src/integrations/ebay_finance.py`](src/integrations/ebay_finance.py)) und führt sie
+durch den read-only Importer. Unklare Transaktionstypen werden markiert, nicht geraten.
+
+| Modul | Inhalt |
+|---|---|
+| [`src/integrations/ebay_oauth.py`](src/integrations/ebay_oauth.py) | OAuth2: `consent_url` / `exchange_code` / `refresh` (Production) |
+| [`src/integrations/ebay_finance.py`](src/integrations/ebay_finance.py) | Finances-API (read-only) → Importer-Zeilen |
+
+> Hinweis: Die eBay-Endpunkte (`auth.ebay.com`, `api.ebay.com`, `apiz.ebay.com`)
+> brauchen ausgehenden Zugriff — in dieser Sandbox per Egress-Policy gesperrt, daher
+> lokal/auf dem Zielserver ausführen. Die Clients sind über injizierbares HTTP
+> vollständig offline getestet.
+
 ## Schnellstart
 
 ```bash

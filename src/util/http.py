@@ -11,6 +11,7 @@ import json
 import os
 import ssl
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Optional
 
@@ -55,6 +56,33 @@ def http_json(
         hdrs.update(headers)
 
     req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:
+            body = resp.read().decode("utf-8")
+            return json.loads(body) if body else {}
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise HttpError(exc.code, body) from exc
+
+
+def post_form(
+    url: str,
+    form: dict,
+    *,
+    headers: Optional[dict] = None,
+    timeout: float = 30.0,
+) -> dict:
+    """POST mit ``application/x-www-form-urlencoded`` Body, JSON-Antwort.
+
+    Fuer OAuth-Token-Endpunkte (z. B. eBay), die Form-Encoding und Basic-Auth
+    erwarten. Wirft ``HttpError`` bei Status >= 400.
+    """
+    data = urllib.parse.urlencode(form).encode("utf-8")
+    hdrs = {"Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json"}
+    if headers:
+        hdrs.update(headers)
+    req = urllib.request.Request(url, data=data, headers=hdrs, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:
             body = resp.read().decode("utf-8")

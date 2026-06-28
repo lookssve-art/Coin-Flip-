@@ -11,6 +11,9 @@ Verwendung:
     python run.py audit-verify         # Hash-Kette des Audit-Logs pruefen
     python run.py telegram-check       # Telegram-Bot-Token verifizieren (getMe)
     python run.py telegram             # Telegram-Bot starten (Freigabe-Interface)
+    python run.py ebay-auth            # eBay-Consent-URL ausgeben (OAuth-Flow starten)
+    python run.py ebay-token <code>    # Authorization-Code gegen Refresh-Token tauschen
+    python run.py ebay-sync [tage]     # eBay-Transaktionen abrufen + Reconciliation-Import
 """
 
 from __future__ import annotations
@@ -165,12 +168,87 @@ def cmd_telegram(config: dict) -> int:
     return 0
 
 
+def _ebay_oauth(config: dict):
+    from src.integrations import EbayOAuth
+    e = config.get("integrationen", {}).get("ebay", {})
+    fehlend = [k for k in ("app_id", "cert_id", "ru_name") if not e.get(k)]
+    if fehlend:
+        print(f"eBay-Config unvollstaendig: {', '.join(fehlend)} fehlen in config.yaml.")
+        return None, e
+    return EbayOAuth(app_id=e["app_id"], cert_id=e["cert_id"], ru_name=e["ru_name"],
+                     environment=e.get("environment", "production")), e
+
+
+def cmd_ebay_auth(config: dict) -> int:
+    oauth, _ = _ebay_oauth(config)
+    if oauth is None:
+        return 2
+    print("1) Oeffne diese URL im Browser und bestaetige den Zugriff:\n")
+    print(oauth.consent_url(state="sero"))
+    print("\n2) eBay leitet auf deine RuName-URL mit ?code=... weiter.")
+    print("3) Fuehre dann aus:  python run.py ebay-token <code>")
+    return 0
+
+
+def cmd_ebay_token(config: dict, code: str = "") -> int:
+    oauth, _ = _ebay_oauth(config)
+    if oauth is None:
+        return 2
+    if not code:
+        print("Bitte den Authorization-Code angeben: python run.py ebay-token <code>")
+        return 2
+    try:
+        tok = oauth.exchange_code(code)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Token-Austausch fehlgeschlagen: {exc}")
+        return 1
+    print("Refresh-Token erhalten. Trage ihn in config.yaml unter "
+          "integrationen.ebay.refresh_token ein:\n")
+    print(tok.refresh_token)
+    print(f"\n(Access-Token gueltig ~{tok.expires_in}s; "
+          f"Refresh-Token ~{tok.refresh_token_expires_in}s)")
+    return 0
+
+
+def cmd_ebay_sync(config: dict, tage: str = "30") -> int:
+    from datetime import date, timedelta
+    from src.integrations import EbayFinanceClient
+    from src.imports import importiere_ebay_verkaeufe
+    oauth, e = _ebay_oauth(config)
+    if oauth is None:
+        return 2
+    if not e.get("refresh_token"):
+        print("Kein refresh_token in config.yaml — zuerst `ebay-auth` + `ebay-token` ausfuehren.")
+        return 2
+    try:
+        tok = oauth.refresh(e["refresh_token"])
+        client = EbayFinanceClient(access_token=tok.access_token,
+                                   marketplace_id=e.get("marketplace_id", "EBAY_DE"),
+                                   environment=e.get("environment", "production"))
+        ende = date.today()
+        start = ende - timedelta(days=int(tage))
+        roh = client.get_transactions(start=start, end=ende)
+    except Exception as exc:  # noqa: BLE001
+        print(f"eBay-Abruf fehlgeschlagen: {exc}")
+        return 1
+    rows = EbayFinanceClient.to_rows(roh)
+    sales = importiere_ebay_verkaeufe(rows)
+    print(f"eBay-Sync {start}..{ende}: {len(roh)} Transaktionen -> {len(sales)} Vorgaenge.")
+    unklar = [r for r in rows if r.get("_review")]
+    if unklar:
+        print(f"  {len(unklar)} zur Pruefung markiert (unklarer Typ).")
+    return 0
+
+
 COMMANDS = {
     "demo": cmd_demo,
     "verfahrensdoku": cmd_verfahrensdoku,
     "audit-verify": cmd_audit_verify,
     "telegram-check": cmd_telegram_check,
     "telegram": cmd_telegram,
+    "ebay-auth": cmd_ebay_auth,
+    "ebay-token": cmd_ebay_token,
+    "ebay-sync": cmd_ebay_sync,
 }
 
 
@@ -179,7 +257,11 @@ def main(argv: list[str]) -> int:
     if cmd in ("-h", "--help", "help") or cmd not in COMMANDS:
         print(__doc__)
         return 0 if cmd in ("-h", "--help", "help") else 2
-    return COMMANDS[cmd](lade_config())
+    config = lade_config()
+    extra = argv[2:]
+    if extra:
+        return COMMANDS[cmd](config, *extra)
+    return COMMANDS[cmd](config)
 
 
 if __name__ == "__main__":
