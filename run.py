@@ -453,6 +453,7 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     from src.export import schreibe_buchungsjournal, schreibe_differenz_journal
     from src.tax import ustva_vorbereitung, journalisiere_verkaeufe
     from src.util import ab_geschaeftsbeginn
+    ku = bool(config.get("steuer", {}).get("kleinunternehmer", True))
     # Pfade aus der Konfiguration uebernehmen, fehlende Quellen tolerieren:
     # so rechnet sync auch nur mit eBay-Daten (ohne Belege/Konto-CSV).
     belege_dir = belege_dir or config.get("pfade", {}).get("belege_inbox", "")
@@ -541,7 +542,6 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
             queue.add(f"Annaeherung/Ueberschreitung Schwelle {st.name}", bezug="schwellen")
 
     print(f"  Review-Queue: {len(queue.offen())} offen.")
-    ku = bool(config.get("steuer", {}).get("kleinunternehmer", True))
     report = ustva_vorbereitung(
         "laufend", kleinunternehmer=ku,
         umsatzsteuer_je_satz=journal.regel_ust_je_satz, differenz_ust=journal.differenz_ust)
