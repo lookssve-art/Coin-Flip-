@@ -564,15 +564,15 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     # EÜR-Übersicht (Einnahmen/Ausgaben je Kategorie).
     euer = euer_uebersicht(sales, receipts, kleinunternehmer=ku, zeitraum="laufend",
                            gewst_freibetrag=Decimal(str(sch.get("gewerbesteuer_freibetrag_eur", 24500))))
-    # eBay-Wareneinkauf ab Geschaeftsbeginn als Betriebsausgabe (Zufluss/Abfluss).
-    wareneinkauf = _ebay_wareneinkauf(config, beginn)
+    # eBay-Wareneinkauf (ab einkauf_ab, also inkl. Altbestand) als Warenkosten.
+    wareneinkauf = _ebay_wareneinkauf(config, _einkauf_ab(config))
     if wareneinkauf > 0:
         euer.ausgaben_je_kategorie["wareneinkauf"] = (
             euer.ausgaben_je_kategorie.get("wareneinkauf", Decimal("0")) + wareneinkauf)
         euer.ausgaben_gesamt += wareneinkauf
         euer.gewinn = euer.einnahmen_gesamt - euer.ausgaben_gesamt
-        euer.hinweise.append("Wareneinkauf vor Gruendung (Einlage) ist hier NICHT enthalten "
-                             "— bitte mit Steuerberater bewerten.")
+        euer.hinweise.append("Wareneinkauf enthaelt auch vor Gruendung gekaufte Ware "
+                             "(Einlage) — Bewertung/Behandlung mit Steuerberater klaeren.")
     schreibe_euer_csv("data/euer_uebersicht.csv", euer)
     print(f"  EÜR: Einnahmen {euer.einnahmen_gesamt} - Ausgaben {euer.ausgaben_gesamt} "
           f"= Gewinn {euer.gewinn} EUR (data/euer_uebersicht.csv).")
