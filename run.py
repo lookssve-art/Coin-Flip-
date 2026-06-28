@@ -1107,7 +1107,14 @@ def main(argv: list[str]) -> int:
         print(__doc__)
         return 0 if cmd in ("-h", "--help", "help") else 2
     config = lade_config()
-    extra = argv[2:]
+    # Beim Kopieren mit Kommentar (z. B. `... ebay-signkey  # erstellt ...`) gibt
+    # eine interaktive zsh die Kommentarwoerter als Argumente weiter — alles ab dem
+    # ersten mit `#` beginnenden Token verwerfen, damit das nicht crasht.
+    extra = []
+    for a in argv[2:]:
+        if a.startswith("#"):
+            break
+        extra.append(a)
     if extra:
         return COMMANDS[cmd](config, *extra)
     return COMMANDS[cmd](config)
