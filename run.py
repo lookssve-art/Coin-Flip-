@@ -171,12 +171,13 @@ def cmd_telegram(config: dict) -> int:
     llm = config.get("integrationen", {}).get("llm", {})
     bot = TelegramBot(
         token=tg["token"],
-        review_queue=ReviewQueue(),
+        review_queue=_review_queue(config),
         audit_log=AuditLog(config["pfade"]["audit_log"]),
         allowed_user_ids=allowed,
         duden=Duden(),
         llm_api_key=llm.get("api_key", ""),
         llm_model=llm.get("model", "claude-opus-4-8"),
+        status_path=config.get("pfade", {}).get("status", ""),
     )
     bot.run(poll_timeout=int(tg.get("poll_timeout", 30)))
     return 0
@@ -322,13 +323,18 @@ def cmd_bank_import(config: dict, csv_path: str = "") -> int:
     return 0
 
 
+def _review_queue(config: dict):
+    """Geteilte (persistente) Review-Queue — Pipeline und Bot teilen sich den Store."""
+    from src.review import ReviewQueue
+    return ReviewQueue(path=config.get("pfade", {}).get("review_store"))
+
+
 def _ocr_belege(config: dict, belege_dir: str):
     """Verarbeitet alle Dateien in belege_dir durch die Beleg-Pipeline."""
     from src.ocr import BelegPipeline
-    from src.review import ReviewQueue
     from src.storage import ReceiptStore
     store = ReceiptStore(config.get("pfade", {}).get("belegspeicher", "belege/"))
-    queue = ReviewQueue()
+    queue = _review_queue(config)
     pipeline = BelegPipeline(store=store, review_queue=queue)
     receipts = []
     for name in sorted(os.listdir(belege_dir)):
@@ -477,6 +483,27 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
         print(f"  USt-VA: {report.hinweise[0]}")
     else:
         print(f"  USt-VA (Entwurf): Zahllast {report.zahllast} EUR.")
+
+    # Dashboard-Snapshot fuer den Telegram-Bot (/report, /schwellen).
+    import json
+    snapshot = {
+        "belege": len(receipts), "banktransaktionen": len(txs), "verkaeufe": len(sales),
+        "differenz_ust": str(journal.differenz_ust),
+        "ustva_zahllast": (None if ku else str(report.zahllast)),
+        "kleinunternehmer": ku,
+        "review_offen": len(queue.offen()),
+        "schwellen": {
+            "ku_laufend": {"aktuell": str(ku_status.aktuell), "grenze": str(ku_status.grenze),
+                           "prozent": str(ku_status.prozent), "warnung": ku_status.warnung,
+                           "ueberschritten": ku_status.ueberschritten},
+            "oss": {"aktuell": str(oss_status.aktuell), "grenze": str(oss_status.grenze),
+                    "prozent": str(oss_status.prozent), "warnung": oss_status.warnung,
+                    "ueberschritten": oss_status.ueberschritten},
+        },
+    }
+    status_pfad = config.get("pfade", {}).get("status", "data/status.json")
+    with open(status_pfad, "w", encoding="utf-8") as fh:
+        json.dump(snapshot, fh, ensure_ascii=False, indent=2)
     return 0
 
 

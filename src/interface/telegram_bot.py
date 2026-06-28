@@ -29,7 +29,9 @@ _HELP = (
     "/review  — offene Freigabe-Faelle anzeigen\n"
     "/approve <ID>  — Fall freigeben (z. B. /approve REV-00001)\n"
     "/reject <ID>   — Fall ablehnen\n"
-    "/status  — Kurzueberblick\n"
+    "/status  — Kurzueberblick (offene Faelle)\n"
+    "/report  — Dashboard: Umsaetze, USt, Schwellen aus dem letzten Sync\n"
+    "/schwellen — § 19- und OSS-Schwellen-Status\n"
     "/duden <frage> — Steuer-/Buchhaltungswissen nachschlagen (A-Z)\n"
     "/help    — diese Hilfe\n\n"
     "Hinweis: Der Assistent bereitet vor — die steuerliche Verantwortung bleibt "
@@ -54,6 +56,7 @@ class TelegramBot:
     duden: Optional[Duden] = None
     llm_api_key: str = ""
     llm_model: str = "claude-opus-4-8"
+    status_path: str = ""
     _offset: int = 0
 
     # ------------------------------------------------------------------ #
@@ -91,10 +94,17 @@ class TelegramBot:
 
         if cmd in ("/start", "/help"):
             return _HELP
+        # Vor Queue-Operationen den geteilten Store neu laden (Pipeline schreibt parallel).
+        if cmd in ("/review", "/status", "/approve", "/reject"):
+            self.review_queue.reload()
         if cmd == "/review":
             return self._cmd_review()
         if cmd == "/status":
             return self._cmd_status()
+        if cmd == "/report":
+            return self._cmd_report()
+        if cmd == "/schwellen":
+            return self._cmd_schwellen()
         if cmd == "/approve":
             return self._cmd_resolve(arg, freigeben=True, von=str(user_id))
         if cmd == "/reject":
@@ -102,6 +112,53 @@ class TelegramBot:
         if cmd == "/duden":
             return self._cmd_duden(arg)
         return "Unbekannter Befehl. /help fuer die Liste."
+
+    def _lade_status(self) -> Optional[dict]:
+        import json
+        import os
+        if not self.status_path or not os.path.exists(self.status_path):
+            return None
+        try:
+            with open(self.status_path, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, ValueError):
+            return None
+
+    def _cmd_report(self) -> str:
+        s = self._lade_status()
+        if s is None:
+            return "Noch kein Sync-Lauf vorhanden. Pipeline (`run-all`/`sync`) ausfuehren."
+        ku = s.get("kleinunternehmer")
+        ust = ("Kleinunternehmer (§19): keine USt-Zahllast"
+               if ku else f"USt-VA-Zahllast (Entwurf): {s.get('ustva_zahllast')} EUR")
+        return (
+            "📊 *Letzter Sync*\n"
+            f"Belege: {s.get('belege')} | Bank: {s.get('banktransaktionen')} | "
+            f"eBay-Verkaeufe: {s.get('verkaeufe')}\n"
+            f"§25a-USt aus Marge: {s.get('differenz_ust')} EUR\n"
+            f"{ust}\n"
+            f"Offene Freigaben: {s.get('review_offen')}\n\n"
+            + self._schwellen_text(s))
+
+    def _cmd_schwellen(self) -> str:
+        s = self._lade_status()
+        if s is None:
+            return "Noch kein Sync-Lauf vorhanden."
+        return self._schwellen_text(s)
+
+    @staticmethod
+    def _schwellen_text(s: dict) -> str:
+        sch = s.get("schwellen", {})
+        zeilen = ["*Schwellen*"]
+        for key, label in (("ku_laufend", "§19 laufend"), ("oss", "OSS-Fernverkauf")):
+            d = sch.get(key, {})
+            if not d:
+                continue
+            flag = ("🔴 ueberschritten" if d.get("ueberschritten")
+                    else ("🟡 Warnung" if d.get("warnung") else "🟢 ok"))
+            zeilen.append(f"{label}: {d.get('aktuell')}/{d.get('grenze')} EUR "
+                          f"({d.get('prozent')}%) {flag}")
+        return "\n".join(zeilen)
 
     def _cmd_duden(self, frage: str) -> str:
         if self.duden is None:

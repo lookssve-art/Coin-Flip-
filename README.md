@@ -58,8 +58,15 @@ Nachricht schicken — er antwortet mit deiner User-ID, die du dann in
 `allowed_user_ids` einträgst und neu startest. Nur gelistete IDs dürfen Freigaben
 erteilen (der Bot steuert Buchhaltungs-Freigaben).
 
-**Befehle:** `/review` (offene Fälle), `/approve <ID>`, `/reject <ID>`, `/status`.
-Jede Freigabe wird im Audit-Log protokolliert.
+**Befehle:** `/review` (offene Fälle), `/approve <ID>`, `/reject <ID>`, `/status`,
+`/report` (Dashboard: Umsätze, USt, Schwellen aus dem letzten Sync), `/schwellen`,
+`/duden <frage>` (Wissensbasis). Jede Freigabe wird im Audit-Log protokolliert.
+
+Die **Review-Queue ist persistent und geteilt** (`pfade.review_store`): die Pipeline
+(`sync`) schreibt offene Fälle, der Bot liest sie (lädt vor jeder Abfrage neu) und löst
+sie auf — beide Prozesse teilen sich denselben Store. `sync` schreibt zusätzlich einen
+**Dashboard-Snapshot** (`pfade.status`), den `/report` und `/schwellen` anzeigen — so
+steuerst du Monitoring **und** Freigaben komplett aus Telegram.
 
 > Hinweis: Der Bot braucht ausgehenden Zugriff auf `api.telegram.org`. In manchen
 > abgesicherten CI-/Cloud-Umgebungen ist dieser Host per Egress-Policy gesperrt —

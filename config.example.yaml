@@ -47,6 +47,8 @@ pfade:
   einkaufspreise: "data/einkaufspreise.json"  # {product_id: preis} fuer § 25a
   belege_inbox: "inbox/belege/"          # autonomer Betrieb: Belege hier ablegen
   bank_csv: "inbox/kontoumsaetze.csv"    # autonomer Betrieb: Lexware-Konto-CSV
+  review_store: "data/review_queue.json" # geteilte Review-Queue (Pipeline <-> Bot)
+  status: "data/status.json"             # Dashboard-Snapshot (Bot /report, /schwellen)
 
 betrieb:
   pipeline_intervall_stunden: 6          # `serve`: Pipeline-Takt

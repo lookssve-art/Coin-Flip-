@@ -49,14 +49,74 @@ def pruefe_review_trigger(
 
 
 class ReviewQueue:
-    def __init__(self):
+    """Review-Queue, optional JSON-persistent.
+
+    Mit ``path`` wird die Queue ueber Prozesse geteilt (Pipeline schreibt,
+    Telegram-Bot liest/loest auf). Ohne ``path`` rein im Speicher (wie bisher).
+    Doppelte offene Faelle (gleicher Grund + Bezug) werden nicht erneut angelegt,
+    damit wiederholte ``sync``-Laeufe die Queue nicht aufblaehen.
+    """
+
+    def __init__(self, path: Optional[str] = None):
+        self.path = path
         self._items: dict[str, ReviewItem] = {}
         self._counter = itertools.count(1)
+        if path:
+            self._load()
 
+    # ------------------------------------------------------------------ #
+    def _load(self) -> None:
+        import json
+        import os
+        if not self.path or not os.path.exists(self.path):
+            return
+        with open(self.path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        max_n = 0
+        for d in data:
+            item = ReviewItem(
+                id=d["id"], grund=d["grund"], bezug=d["bezug"],
+                status=ReviewStatus(d.get("status", "review_required")),
+                erstellt=d.get("erstellt", ""), aufgeloest_von=d.get("aufgeloest_von"))
+            self._items[item.id] = item
+            try:
+                max_n = max(max_n, int(item.id.split("-")[-1]))
+            except ValueError:
+                pass
+        self._counter = itertools.count(max_n + 1)
+
+    def reload(self) -> None:
+        """Liest den persistenten Store neu (Bot sieht Pipeline-Aenderungen)."""
+        if not self.path:
+            return
+        self._items = {}
+        self._load()
+
+    def _save(self) -> None:
+        if not self.path:
+            return
+        import json
+        import os
+        os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
+        data = [{"id": i.id, "grund": i.grund, "bezug": i.bezug,
+                 "status": i.status.value, "erstellt": i.erstellt,
+                 "aufgeloest_von": i.aufgeloest_von} for i in self._items.values()]
+        tmp = self.path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp, self.path)
+
+    # ------------------------------------------------------------------ #
     def add(self, grund: str, bezug: str) -> ReviewItem:
+        # Idempotenz: bestehenden offenen Fall (Grund+Bezug) wiederverwenden.
+        for i in self._items.values():
+            if (i.status == ReviewStatus.REVIEW_REQUIRED
+                    and i.grund == grund and i.bezug == bezug):
+                return i
         item_id = f"REV-{next(self._counter):05d}"
         item = ReviewItem(id=item_id, grund=grund, bezug=bezug)
         self._items[item_id] = item
+        self._save()
         return item
 
     def add_many(self, gruende: list[str], bezug: str) -> list[ReviewItem]:
@@ -76,4 +136,5 @@ class ReviewQueue:
             return None
         item.status = ReviewStatus.APPROVED if freigeben else ReviewStatus.REJECTED
         item.aufgeloest_von = von
+        self._save()
         return item
