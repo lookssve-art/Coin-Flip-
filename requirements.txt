@@ -3,7 +3,8 @@
 PyYAML>=6.0          # Konfiguration
 
 # --- Optional / spaetere MVP-Stufen (auskommentiert, bis benoetigt) ---
-# requests>=2.31.0          # API-Clients (Lexware, eBay, Bank-Aggregator)
+# anthropic>=0.49          # Claude-Klassifikator (src/ocr/classify.py ClaudeClassifier)
+# requests>=2.31.0          # weitere API-Clients (Bank-Aggregator); Telegram/Lexware nutzen stdlib urllib
 # lxml>=5.0                 # robustes XRechnung/ZUGFeRD-XML-Parsing
 # psycopg[binary]>=3.1      # PostgreSQL (Prod statt SQLite)
 # python-dateutil>=2.9      # Datums-/Quartalslogik

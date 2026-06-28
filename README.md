@@ -39,9 +39,12 @@ Ergänzt die vier Lücken, die in einer Betriebsprüfung über „anerkannt" vs.
 | **Lexware-Export** (Draft-Voucher, 2 req/s Rate-Limit-Backoff) | [`src/export/lexware.py`](src/export/lexware.py) |
 | **DATEV-/CSV-Journal** (Buchungs- + §25a-Differenzjournal, offline) | [`src/export/datev_csv.py`](src/export/datev_csv.py) |
 | **Telegram-Freigabe-/Review-Interface** (Human-in-the-Loop) | [`src/interface/telegram_bot.py`](src/interface/telegram_bot.py) |
+| **OCR-/Beleg-Pipeline** (Extraktion → Klassifikation → WORM-Ablage → Review) | [`src/ocr/`](src/ocr/) |
+| **Claude-Klassifikator** (Opus 4.8, optional, offizielles SDK) | [`src/ocr/classify.py`](src/ocr/classify.py) |
 
-Noch offen (spätere MVP-Stufe): OCR-Pipeline (3). Priorisiert wurde — wie in der
-Spezifikation gefordert — das Compliance-Fundament **vor** den Komfortfeatures.
+Damit sind **alle 7 MVP-Punkte** umgesetzt. Cloud-OCR (Textract/Document AI) ist als
+injizierbarer Anbieter vorgesehen; ohne ihn gehen Bildbelege bewusst in die
+Review-Queue, statt geraten zu werden.
 
 ## Telegram-Bot (Freigabe-Interface)
 

@@ -206,7 +206,8 @@ Erzeugt jederzeit: Umsatzübersicht (Monat/Jahr), **USt-VA-Vorbereitung** (Zahll
 | 1 — Beleg-Storage (WORM, inhaltsadressiert) | ✅ | `src/storage/receipt_store.py` |
 | 2 — Bank/eBay-Import (read-only) | ✅ | `src/imports/bank.py`, `src/imports/ebay.py` |
 | 2 — Reconciliation-Grundlogik | ✅ | `src/reconciliation/engine.py` |
-| 3 — OCR-Pipeline | ⏳ offen | — |
+| 3 — OCR-Pipeline (Extraktion + Klassifikation) | ✅ | `src/ocr/pipeline.py`, `src/ocr/extract.py`, `src/ocr/classify.py` |
+| 3 — Claude-Klassifikator (Opus 4.8, optional) | ✅ | `src/ocr/classify.py` (`ClaudeClassifier`) |
 | 3 — Review-Queue + REVIEW_REQUIRED-Trigger | ✅ | `src/review/queue.py` |
 | 4 — Differenzbesteuerung § 25a (Einzel-/Gesamtdifferenz) | ✅ | `src/tax/differenzbesteuerung.py` |
 | 5 — E-Rechnungs-Empfang (XRechnung/ZUGFeRD) | ✅ (Basis) | `src/einvoice/parser.py` |
