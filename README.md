@@ -68,6 +68,12 @@ sie auf — beide Prozesse teilen sich denselben Store. `sync` schreibt zusätzl
 **Dashboard-Snapshot** (`pfade.status`), den `/report` und `/schwellen` anzeigen — so
 steuerst du Monitoring **und** Freigaben komplett aus Telegram.
 
+**Proaktive Benachrichtigung:** Nach jedem Pipeline-Lauf meldet der Agent von sich aus
+**neue Freigabe-Fälle** und **neu eintretende Schwellen-Warnungen** (§19/OSS) per Telegram-DM
+an die freigeschalteten Nutzer — du musst nicht pollen. Ein Zustand (`pfade.notify_state`)
+verhindert Doppel-Meldungen (jeder Fall genau einmal; Schwelle nur beim Übergang ok→Warnung).
+Modul: [`src/interface/notifier.py`](src/interface/notifier.py).
+
 > Hinweis: Der Bot braucht ausgehenden Zugriff auf `api.telegram.org`. In manchen
 > abgesicherten CI-/Cloud-Umgebungen ist dieser Host per Egress-Policy gesperrt —
 > dort den Bot lokal bzw. auf dem Zielserver starten.

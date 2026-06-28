@@ -49,6 +49,7 @@ pfade:
   bank_csv: "inbox/kontoumsaetze.csv"    # autonomer Betrieb: Lexware-Konto-CSV
   review_store: "data/review_queue.json" # geteilte Review-Queue (Pipeline <-> Bot)
   status: "data/status.json"             # Dashboard-Snapshot (Bot /report, /schwellen)
+  notify_state: "data/notified.json"     # Zustand fuer proaktive Meldungen (Anti-Doppel)
 
 betrieb:
   pipeline_intervall_stunden: 6          # `serve`: Pipeline-Takt

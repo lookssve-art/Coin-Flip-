@@ -224,6 +224,7 @@ Erzeugt jederzeit: Umsatzübersicht (Monat/Jahr), **USt-VA-Vorbereitung** (Zahll
 | 7 — Telegram-Freigabe-/Review-Interface | ✅ | `src/interface/telegram_bot.py` |
 | 7 — Persistente, geteilte Review-Queue (Pipeline ↔ Bot) | ✅ | `src/review/queue.py` |
 | 7 — Telegram-Dashboard (`/report`, `/schwellen`) | ✅ | `src/interface/telegram_bot.py` |
+| 7 — Proaktive Benachrichtigung (neue Fälle / Schwellen) | ✅ | `src/interface/notifier.py` |
 | 7 — Schwellen-Monitoring im `sync` (§19 + OSS 10k) | ✅ | `run.py` (cmd_sync), `src/tax/schwellen.py` |
 | 7 — Telegram-„Duden" (Wissensbasis A–Z, optional Claude) | ✅ | `src/wissen/duden.py` |
 | Geschäftsbeginn-Cutoff (Daten ab Gründung) | ✅ | `src/util/datum.py` |

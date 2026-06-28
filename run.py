@@ -504,7 +504,30 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     status_pfad = config.get("pfade", {}).get("status", "data/status.json")
     with open(status_pfad, "w", encoding="utf-8") as fh:
         json.dump(snapshot, fh, ensure_ascii=False, indent=2)
+
+    _benachrichtige(config, queue, snapshot)
     return 0
+
+
+def _benachrichtige(config: dict, queue, snapshot: dict) -> None:
+    """Proaktive Telegram-Meldung neuer Faelle/Schwellen (guarded, nie crashen)."""
+    import json
+    tg = config.get("interface", {}).get("telegram", {})
+    if not (tg.get("token") and tg.get("allowed_user_ids")):
+        return
+    from src.interface import baue_meldungen, TelegramNotifier
+    state_pfad = config.get("pfade", {}).get("notify_state", "data/notified.json")
+    state = _lade_json(state_pfad) or {}
+    texte, neuer_state = baue_meldungen(queue.offen(), snapshot, state)
+    if texte:
+        try:
+            TelegramNotifier(tg["token"], list(tg["allowed_user_ids"])).sende(
+                "📬 SERO-Agent\n\n" + "\n\n".join(texte))
+        except Exception as exc:  # noqa: BLE001
+            print(f"  (Benachrichtigung fehlgeschlagen: {exc})")
+    os.makedirs(os.path.dirname(state_pfad) or ".", exist_ok=True)
+    with open(state_pfad, "w", encoding="utf-8") as fh:
+        json.dump(neuer_state, fh, ensure_ascii=False, indent=2)
 
 
 def cmd_lexware_push(config: dict, belege_dir: str = "") -> int:
