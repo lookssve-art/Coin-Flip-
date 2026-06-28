@@ -16,6 +16,8 @@ Verwendung:
     python run.py ebay-sync [tage]     # eBay-Transaktionen abrufen + Reconciliation-Import
     python run.py ebay-kaeufe [export] # eBay-Kaufhistorie (JSON) -> Einkaufspreise (§25a)
     python run.py ebay-kaeufe-api      # Kaeufe der letzten ~90 Tage live via Trading-API holen
+    python run.py ebay-signkey         # Ed25519-Signaturschluessel fuer Finances-API erstellen
+    python run.py ebay-finances [tage] # ECHTE eBay-Gebuehren signiert abrufen (data/ebay_fees.json)
     python run.py lexware-ping         # Lexware-API-Key verifizieren (/profile)
     python run.py bank-import <csv>    # Lexware-Geschaeftskonto-CSV importieren
     python run.py lexware-push <dir>   # Belege aus <dir> als Draft-Vouchers nach Lexware
@@ -253,6 +255,116 @@ def _config_setze_ebay_refresh(token: str) -> bool:
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(neu)
     return n > 0
+
+
+def _signing_key_pfad(config: dict) -> str:
+    return config.get("pfade", {}).get("ebay_signing_key", "data/ebay_signing_key.json")
+
+
+def cmd_ebay_signkey(config: dict) -> int:
+    """Erzeugt EINMALIG den Ed25519-Signaturschluessel fuer die Finances-API.
+
+    eBay gibt den Private Key nur jetzt heraus; er wird gitignored unter
+    data/ebay_signing_key.json gespeichert. Danach kann `ebay-finances` die
+    echten Gebuehren signiert abrufen.
+    """
+    import json
+    from src.integrations import EbayKeyManagement
+    access_token, e = _ebay_access_token(config)
+    if not access_token:
+        print("Kein eBay-Token. Zuerst `ebay-auth` + `ebay-token` ausfuehren.")
+        return 2
+    pfad = _signing_key_pfad(config)
+    if os.path.exists(pfad):
+        bestand = _lade_json(pfad) or {}
+        print(f"Es existiert bereits ein Signaturschluessel ({bestand.get('signing_key_id', '?')}).")
+        print(f"Zum Neu-Erstellen die Datei loeschen: {pfad}")
+        return 0
+    try:
+        km = EbayKeyManagement(access_token=access_token,
+                               environment=e.get("environment", "production"))
+        key = km.create_signing_key("ED25519")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Schlusselerstellung fehlgeschlagen: {exc}")
+        return 1
+    if not key.private_key or not key.jwe:
+        print("eBay hat keinen Private Key/JWE geliefert — Antwort unvollstaendig.")
+        return 1
+    daten = {
+        "signing_key_id": key.signing_key_id, "jwe": key.jwe,
+        "private_key": key.private_key, "public_key": key.public_key,
+        "expiration_time": key.expiration_time, "cipher": key.cipher,
+    }
+    os.makedirs(os.path.dirname(pfad) or ".", exist_ok=True)
+    with open(pfad, "w", encoding="utf-8") as fh:
+        json.dump(daten, fh, ensure_ascii=False, indent=2)
+    print(f"\n✅ Signaturschluessel erstellt und gespeichert -> {pfad} (gitignored).")
+    print(f"   Key-ID: {key.signing_key_id}")
+    if key.expiration_time:
+        from datetime import datetime, timezone
+        ablauf = datetime.fromtimestamp(key.expiration_time, tz=timezone.utc).date()
+        print(f"   Gueltig bis: {ablauf}")
+    print("   Jetzt echte Gebuehren ziehen:  python run.py ebay-finances")
+    return 0
+
+
+def _ebay_signing_context(config: dict):
+    """Baut den SigningContext aus dem gespeicherten Schluessel (oder None)."""
+    import time
+    from src.integrations import SigningContext, ed25519
+    daten = _lade_json(_signing_key_pfad(config))
+    if not daten or not daten.get("jwe") or not daten.get("private_key"):
+        return None
+    seed = ed25519.seed_from_pkcs8(daten["private_key"])
+    return SigningContext(jwe=daten["jwe"], seed=seed, clock=lambda: int(time.time()))
+
+
+def cmd_ebay_finances(config: dict, tage: str = "") -> int:
+    """Holt die ECHTEN eBay-Gebuehren signiert via Finances-API und schreibt sie
+    nach data/ebay_fees.json (von `sync`/`run-all` bevorzugt verwendet)."""
+    import json
+    import time
+    from datetime import date
+    from src.integrations import EbayFinanceClient
+    from src.util import parse_iso
+    access_token, e = _ebay_access_token(config)
+    if not access_token:
+        print("Kein eBay-Token. Zuerst `ebay-auth` + `ebay-token` ausfuehren.")
+        return 2
+    signing = _ebay_signing_context(config)
+    if signing is None:
+        print("Kein Signaturschluessel. Zuerst `python run.py ebay-signkey` ausfuehren.")
+        return 2
+    start = _geschaeftsbeginn(config) or parse_iso("2026-01-01")
+    ende = date.today()
+    try:
+        client = EbayFinanceClient(
+            access_token=access_token,
+            marketplace_id=e.get("marketplace_id", "EBAY_DE"),
+            environment=e.get("environment", "production"), signing=signing)
+        txs = client.get_all_transactions(start=start, end=ende)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Finances-API fehlgeschlagen: {exc}\n"
+              "Pruefe: Signaturschluessel gueltig, Scope sell.finances erteilt.")
+        return 1
+    s = EbayFinanceClient.fee_summary(txs)
+    ergebnis = {
+        "stand": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "zeitraum": {"von": start.isoformat(), "bis": ende.isoformat()},
+        "fees_total": str(s["fees_total"]), "sales_gross": str(s["sales_gross"]),
+        "refunds_total": str(s["refunds_total"]), "n_sales": s["n_sales"],
+        "transaktionen": len(txs),
+    }
+    pfad = config.get("pfade", {}).get("ebay_fees_export", "data/ebay_fees.json")
+    os.makedirs(os.path.dirname(pfad) or ".", exist_ok=True)
+    with open(pfad, "w", encoding="utf-8") as fh:
+        json.dump(ergebnis, fh, ensure_ascii=False, indent=2)
+    print(f"Finances-API: {len(txs)} Transaktionen, {s['n_sales']} Verkaeufe "
+          f"({start} – {ende}).")
+    print(f"  Echte eBay-Gebuehren: {s['fees_total']} EUR -> {pfad}")
+    print(f"  (Brutto {s['sales_gross']} EUR, Refunds {s['refunds_total']} EUR)")
+    print("  `python run.py sync` nutzt diese echten Gebuehren jetzt automatisch.")
+    return 0
 
 
 def cmd_ebay_sync(config: dict, tage: str = "30") -> int:
@@ -574,16 +686,24 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
             euer.ausgaben_je_kategorie.get("wareneinkauf", Decimal("0")) + wareneinkauf)
         euer.hinweise.append("Wareneinkauf enthaelt auch vor Gruendung gekaufte Ware "
                              "(Einlage) — Bewertung/Behandlung mit Steuerberater klaeren.")
-    # eBay-Verkaufsgebuehren (Schaetzung: % vom Umsatz + fixe Gebuehr je Verkauf).
+    # eBay-Verkaufsgebuehren: ECHT aus der Finances-API (signiert) bevorzugen,
+    # sonst Schaetzung (% vom Umsatz + fixe Gebuehr je Verkauf).
     costs = config.get("costs", {})
-    fee_pct = Decimal(str(costs.get("ebay_fee_percent", 0.13)))
-    fee_fix = Decimal(str(costs.get("ebay_fixed_per_order", 0.35)))
-    gebuehren = (euer.einnahmen_gesamt * fee_pct + len(sales) * fee_fix).quantize(Decimal("0.01"))
+    fees_pfad = config.get("pfade", {}).get("ebay_fees_export", "data/ebay_fees.json")
+    fees_real = _lade_json(fees_pfad) if os.path.exists(fees_pfad) else None
+    if fees_real and Decimal(str(fees_real.get("fees_total", "0"))) > 0:
+        gebuehren = Decimal(str(fees_real["fees_total"])).quantize(Decimal("0.01"))
+        euer.hinweise.append(f"eBay-Gebuehren ECHT aus Finances-API ({fees_real.get('n_sales', '?')} "
+                             f"Verkaeufe, Stand {str(fees_real.get('stand', ''))[:10]}).")
+    else:
+        fee_pct = Decimal(str(costs.get("ebay_fee_percent", 0.13)))
+        fee_fix = Decimal(str(costs.get("ebay_fixed_per_order", 0.35)))
+        gebuehren = (euer.einnahmen_gesamt * fee_pct + len(sales) * fee_fix).quantize(Decimal("0.01"))
+        euer.hinweise.append(f"eBay-Gebuehren geschaetzt ({fee_pct*100:.0f} % + {fee_fix}/Verkauf); "
+                             "fuer centgenau: `python run.py ebay-finances`.")
     if gebuehren > 0:
         euer.ausgaben_je_kategorie["gebuehren"] = (
             euer.ausgaben_je_kategorie.get("gebuehren", Decimal("0")) + gebuehren)
-        euer.hinweise.append(f"eBay-Gebuehren geschaetzt ({fee_pct*100:.0f} % + {fee_fix}/Verkauf); "
-                             "centgenau via Finanz-API (digitale Signaturen) moeglich.")
     # Gesamtsumme + Gewinn neu berechnen.
     euer.ausgaben_gesamt = sum(euer.ausgaben_je_kategorie.values(), Decimal("0"))
     euer.gewinn = euer.einnahmen_gesamt - euer.ausgaben_gesamt
@@ -702,6 +822,9 @@ def cmd_check(config: dict) -> int:
         print(zeile(False, "Refresh-/Access-Token", "ebay-auth -> ebay-token <code> ausfuehren"))
     print(zeile(os.path.exists(pfade.get("ebay_kaeufe_export", "")), "Kaufhistorie-Export",
                f"nach {pfade.get('ebay_kaeufe_export', 'data/ebay_kaeufe.json')} exportieren"))
+    sign_pfad = pfade.get("ebay_signing_key", "data/ebay_signing_key.json")
+    print(zeile(os.path.exists(sign_pfad), "Finances-Signaturschluessel (echte Gebuehren)",
+               "fuer centgenaue eBay-Gebuehren: `python run.py ebay-signkey`"))
 
     print("\nLexware Office (Konto + Buchung):")
     print(zeile(bool(lex.get("api_key")), "API-Key"))
@@ -902,10 +1025,15 @@ def cmd_run_all(config: dict) -> int:
     if os.path.exists(pfade.get("ebay_kaeufe_export", "")):
         _schritt("eBay-Kaeufe -> Einkaufspreise", lambda: cmd_ebay_kaeufe(config))
 
-    # 2) eBay-Verkaeufe abrufen (Trading-API; Finances braucht Signaturen, daher nicht).
+    # 2) eBay-Verkaeufe abrufen (Trading-API; Verkaufszeilen ohne Signatur).
     if hat_token:
         _schritt("eBay-Verkaeufe (Trading-API)",
                  lambda: cmd_ebay_verkaeufe_api(config, tage))
+
+    # 2b) ECHTE Gebuehren signiert via Finances-API — nur wenn Signaturschluessel da.
+    if hat_token and os.path.exists(_signing_key_pfad(config)):
+        _schritt("eBay-Gebuehren (Finances-API, signiert)",
+                 lambda: cmd_ebay_finances(config))
 
     # 3) Auswertung — rechnet mit allem, was da ist (eBay-Verkaeufe genuegen;
     #    Belege/Konto-CSV werden einbezogen, wenn vorhanden).
@@ -959,6 +1087,8 @@ COMMANDS = {
     "ebay-kaeufe": cmd_ebay_kaeufe,
     "ebay-kaeufe-api": cmd_ebay_kaeufe_api,
     "ebay-verkaeufe-api": cmd_ebay_verkaeufe_api,
+    "ebay-signkey": cmd_ebay_signkey,
+    "ebay-finances": cmd_ebay_finances,
     "lexware-ping": cmd_lexware_ping,
     "bank-import": cmd_bank_import,
     "sync": cmd_sync,
