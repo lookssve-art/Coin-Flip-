@@ -7,6 +7,7 @@ from .differenzbesteuerung import (
 )
 from .schwellen import SchwellenMonitor, SchwellenStatus
 from .ustva import ustva_vorbereitung, UStVaReport
+from .verkaeufe import journalisiere_verkaeufe, VerkaufsJournal
 
 __all__ = [
     "einzeldifferenz",
@@ -16,4 +17,6 @@ __all__ = [
     "SchwellenStatus",
     "ustva_vorbereitung",
     "UStVaReport",
+    "journalisiere_verkaeufe",
+    "VerkaufsJournal",
 ]

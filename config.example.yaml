@@ -40,6 +40,8 @@ pfade:
   audit_log: "audit/audit_log.jsonl"     # append-only, hash-verkettet
   belegspeicher: "belege/"               # WORM / versioniert
   verfahrensdoku: "docs/verfahrensdokumentation.md"
+  ebay_export: "data/ebay_rows.json"     # optional: eBay-Verkaufszeilen (JSON) fuer sync
+  einkaufspreise: "data/einkaufspreise.json"  # optional: {product_id: preis} fuer § 25a
 
 # --- Integrationen ---
 # WICHTIG: echte Keys NUR in config.yaml (gitignored) eintragen, nie hier.

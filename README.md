@@ -109,6 +109,16 @@ python run.py lexware-push ./belege     # Belege als Draft-Vouchers nach Lexware
 (Lexware-Kategorie-UUIDs aus `/posting-categories`) auf einen Voucher; Belege ohne
 Mapping, mit unsicherer Vorsteuer oder offener Review werden **übersprungen**, nicht gebucht.
 
+### eBay-Verkäufe + § 25a im `sync`
+
+`sync` zieht zusätzlich die eBay-Verkäufe (`pfade.ebay_export`, von `ebay-sync` befüllt)
+und die Einkaufspreise (`pfade.einkaufspreise`, `{product_id: preis}`) und schreibt ein
+**§ 25a-Differenzbesteuerungs-Journal** (`data/differenz_journal.csv`): Marge = Verkauf − Einkauf,
+USt aus der Marge herausgerechnet. Regelbesteuerte Verkäufe fließen als USt je Satz in den
+USt-VA-Entwurf. § 25a-Verkäufe **ohne** hinterlegten Einkaufspreis gehen in die Review
+(kein Raten); von eBay als Deemed Supplier abgeführte USt wird **nicht** doppelt angesetzt.
+Modul: [`src/tax/verkaeufe.py`](src/tax/verkaeufe.py).
+
 | Modul | Inhalt |
 |---|---|
 | [`src/imports/lexware_bank.py`](src/imports/lexware_bank.py) | Geschäftskonto-CSV (tolerant) → idempotente Bank-Transaktionen |

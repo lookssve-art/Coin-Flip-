@@ -237,7 +237,14 @@ def cmd_ebay_sync(config: dict, tage: str = "30") -> int:
         return 1
     rows = EbayFinanceClient.to_rows(roh)
     sales = importiere_ebay_verkaeufe(rows)
+    # Zeilen fuer den `sync`-Lauf persistieren (data/ebay_rows.json).
+    import json
+    export = config.get("pfade", {}).get("ebay_export", "data/ebay_rows.json")
+    os.makedirs(os.path.dirname(export) or ".", exist_ok=True)
+    with open(export, "w", encoding="utf-8") as fh:
+        json.dump(rows, fh, ensure_ascii=False, indent=2)
     print(f"eBay-Sync {start}..{ende}: {len(roh)} Transaktionen -> {len(sales)} Vorgaenge.")
+    print(f"  Verkaufszeilen gespeichert: {export}")
     unklar = [r for r in rows if r.get("_review")]
     if unklar:
         print(f"  {len(unklar)} zur Pruefung markiert (unklarer Typ).")
@@ -313,32 +320,70 @@ def _ocr_belege(config: dict, belege_dir: str):
     return receipts, queue
 
 
+def _lade_json(pfad: str):
+    import json
+    if not pfad or not os.path.exists(pfad):
+        return None
+    with open(pfad, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _ebay_verkaeufe(config: dict):
+    """Laedt eBay-Verkaufszeilen aus dem konfigurierten Export (falls vorhanden)."""
+    from src.imports import importiere_ebay_verkaeufe
+    pfad = config.get("pfade", {}).get("ebay_export", "")
+    rows = _lade_json(pfad)
+    return importiere_ebay_verkaeufe(rows) if rows else []
+
+
 def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     from decimal import Decimal
     from src.reconciliation import Reconciler, MatchStatus
-    from src.export import schreibe_buchungsjournal
-    from src.tax import ustva_vorbereitung
+    from src.export import schreibe_buchungsjournal, schreibe_differenz_journal
+    from src.tax import ustva_vorbereitung, journalisiere_verkaeufe
     if not belege_dir or not csv_path:
         print("Verwendung: python run.py sync <belege_dir> <bank_csv>")
         return 2
     try:
         receipts, queue = _ocr_belege(config, belege_dir)
         txs = _bank_transaktionen(config, csv_path)
+        sales = _ebay_verkaeufe(config)
     except Exception as exc:  # noqa: BLE001
         print(f"Sync fehlgeschlagen: {exc}")
         return 1
-    ergebnisse = Reconciler().reconcile(txs, receipts)
+
     os.makedirs("data", exist_ok=True)
+    ergebnisse = Reconciler().reconcile(txs, receipts)
     n = schreibe_buchungsjournal("data/buchungsjournal.csv", ergebnisse)
     offen = sum(1 for r in ergebnisse if r.status == MatchStatus.REVIEW_REQUIRED)
     unmatched = sum(1 for r in ergebnisse if r.status == MatchStatus.UNMATCHED)
-    print(f"Sync: {len(receipts)} Belege, {len(txs)} Banktransaktionen.")
+    print(f"Sync: {len(receipts)} Belege, {len(txs)} Banktransaktionen, {len(sales)} eBay-Verkaeufe.")
     print(f"  Reconciliation -> {n} Zeilen (data/buchungsjournal.csv); "
           f"{offen} Review, {unmatched} ohne Beleg.")
-    print(f"  Review-Queue (Belege): {len(queue.offen())} offen.")
+
+    # Verkaufs-Journal: § 25a-Margen + USt je Satz.
+    einkaufspreise_raw = _lade_json(config.get("pfade", {}).get("einkaufspreise", "")) or {}
+    einkaufspreise = {k: Decimal(str(v)) for k, v in einkaufspreise_raw.items()}
+    journal = journalisiere_verkaeufe(sales, einkaufspreise)
+    d = schreibe_differenz_journal("data/differenz_journal.csv", journal.differenz_eintraege)
+    print(f"  § 25a-Journal -> {d} Margen-Eintraege (data/differenz_journal.csv); "
+          f"USt aus Marge {journal.differenz_ust} EUR.")
+    if journal.review_ids:
+        for sid in journal.review_ids:
+            queue.add("Differenzbesteuerung mit unklarem Einkaufsbeleg", bezug=sid)
+        print(f"  {len(journal.review_ids)} § 25a-Verkaeufe ohne Einkaufspreis -> Review.")
+    if journal.deemed_supplier_ust > 0:
+        print(f"  Deemed Supplier: {journal.deemed_supplier_ust} EUR USt bereits von eBay abgefuehrt.")
+
+    print(f"  Review-Queue: {len(queue.offen())} offen.")
     ku = bool(config.get("steuer", {}).get("kleinunternehmer", True))
-    report = ustva_vorbereitung("laufend", kleinunternehmer=ku)
-    print(f"  USt-VA: {report.hinweise[0] if report.hinweise else 'Entwurf erstellt'}")
+    report = ustva_vorbereitung(
+        "laufend", kleinunternehmer=ku,
+        umsatzsteuer_je_satz=journal.regel_ust_je_satz, differenz_ust=journal.differenz_ust)
+    if ku:
+        print(f"  USt-VA: {report.hinweise[0]}")
+    else:
+        print(f"  USt-VA (Entwurf): Zahllast {report.zahllast} EUR.")
     return 0
 
 

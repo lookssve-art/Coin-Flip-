@@ -212,6 +212,7 @@ Erzeugt jederzeit: Umsatzübersicht (Monat/Jahr), **USt-VA-Vorbereitung** (Zahll
 | 3 — Claude-Klassifikator (Opus 4.8, optional) | ✅ | `src/ocr/classify.py` (`ClaudeClassifier`) |
 | 3 — Review-Queue + REVIEW_REQUIRED-Trigger | ✅ | `src/review/queue.py` |
 | 4 — Differenzbesteuerung § 25a (Einzel-/Gesamtdifferenz) | ✅ | `src/tax/differenzbesteuerung.py` |
+| 4 — Verkaufs-Journalisierung (§ 25a-Marge + USt je Satz, eBay) | ✅ | `src/tax/verkaeufe.py` |
 | 5 — E-Rechnungs-Empfang (XRechnung/ZUGFeRD) | ✅ (Basis) | `src/einvoice/parser.py` |
 | 6 — Lexware-Export (Draft-Voucher, Rate-Limit-Backoff) | ✅ | `src/export/lexware.py` |
 | 6 — Lexware-Push (Belege → Draft-Vouchers, live) | ✅ | `src/integrations/lexware_sync.py` |
