@@ -71,6 +71,25 @@ class TestBotDashboard(unittest.TestCase):
             self.assertIn("Warnung", antwort)        # §19 bei 85 %
             self.assertIn("ok", antwort)             # OSS
 
+    def test_uebersicht_ohne_daten(self):
+        antwort = self._bot().handle_command("/uebersicht", user_id=1)
+        self.assertIn("Steuer-Assistent", antwort)
+        self.assertIn("Offene Freigaben", antwort)
+        self.assertIn("Noch kein Durchlauf", antwort)
+
+    def test_uebersicht_mit_daten(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "status.json")
+            with open(p, "w", encoding="utf-8") as fh:
+                json.dump({"belege": 4, "banktransaktionen": 12, "verkaeufe": 9,
+                           "differenz_ust": "31.85", "kleinunternehmer": True,
+                           "ustva_zahllast": None, "euer_gewinn": "742.50",
+                           "euer_einnahmen": "1310.00", "euer_ausgaben": "567.50",
+                           "review_offen": 0, "schwellen": {}}, fh)
+            antwort = self._bot(status_path=p).handle_command("/uebersicht", user_id=1)
+            self.assertIn("Gewinn 742.50 EUR", antwort)
+            self.assertIn("Kleinunternehmer", antwort)
+
     def test_schwellen_command(self):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "status.json")

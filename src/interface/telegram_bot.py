@@ -29,6 +29,7 @@ _HELP = (
     "/review  — offene Freigabe-Faelle anzeigen\n"
     "/approve <ID>  — Fall freigeben (z. B. /approve REV-00001)\n"
     "/reject <ID>   — Fall ablehnen\n"
+    "/uebersicht — was ich mache + aktueller Stand (Einstieg)\n"
     "/status  — Kurzueberblick (offene Faelle)\n"
     "/report  — Dashboard: Umsaetze, USt, Schwellen aus dem letzten Sync\n"
     "/schwellen — § 19- und OSS-Schwellen-Status\n"
@@ -95,8 +96,10 @@ class TelegramBot:
         if cmd in ("/start", "/help"):
             return _HELP
         # Vor Queue-Operationen den geteilten Store neu laden (Pipeline schreibt parallel).
-        if cmd in ("/review", "/status", "/approve", "/reject"):
+        if cmd in ("/review", "/status", "/approve", "/reject", "/uebersicht"):
             self.review_queue.reload()
+        if cmd == "/uebersicht":
+            return self._cmd_uebersicht()
         if cmd == "/review":
             return self._cmd_review()
         if cmd == "/status":
@@ -112,6 +115,47 @@ class TelegramBot:
         if cmd == "/duden":
             return self._cmd_duden(arg)
         return "Unbekannter Befehl. /help fuer die Liste."
+
+    def _cmd_uebersicht(self) -> str:
+        offen = len(self.review_queue.offen())
+        s = self._lade_status()
+        teile = [
+            "👋 *Dein Steuer-Assistent*",
+            "",
+            "Ich sammle automatisch deine eBay-Verkaeufe, -Kaeufe und Kontobewegungen, "
+            "ordne sie steuerlich richtig zu (inkl. Differenzbesteuerung §25a fuer deine "
+            "Sammelware) und bereite USt-VA und EÜR vor. Buchen/abgeben tust du — ich "
+            "bereite alles vor und melde mich, wenn etwas zu klaeren ist.",
+            "",
+            "*Aktueller Stand*",
+        ]
+        if s is None:
+            teile.append("Noch kein Durchlauf vorhanden — sobald Belege + Kontoumsaetze da "
+                         "sind, fuelle ich das hier.")
+        else:
+            ku = s.get("kleinunternehmer")
+            teile.append(f"Belege {s.get('belege')} · Bank {s.get('banktransaktionen')} · "
+                         f"eBay-Verkaeufe {s.get('verkaeufe')}")
+            if s.get("euer_gewinn") is not None:
+                teile.append(f"EÜR: Einnahmen {s.get('euer_einnahmen')} − Ausgaben "
+                             f"{s.get('euer_ausgaben')} = *Gewinn {s.get('euer_gewinn')} EUR*")
+            teile.append("USt: " + ("Kleinunternehmer (§19), keine Zahllast"
+                                    if ku else f"Zahllast {s.get('ustva_zahllast')} EUR"))
+            teile.append(self._schwellen_text(s))
+        teile += [
+            "",
+            f"📋 Offene Freigaben: *{offen}*" + (" — /review" if offen else ""),
+            "",
+            "*Was du tun kannst*",
+            "/report — Zahlen-Dashboard",
+            "/review — offene Faelle freigeben (/approve, /reject)",
+            "/schwellen — Naehe zu §19-/OSS-Grenzen",
+            "/duden <frage> — Steuerwissen nachschlagen",
+            "/help — alle Befehle",
+            "",
+            "_Allgemeine Info, keine Steuerberatung. Die ELSTER-Abgabe bleibt bei dir._",
+        ]
+        return "\n".join(teile)
 
     def _lade_status(self) -> Optional[dict]:
         import json
