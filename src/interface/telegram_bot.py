@@ -96,7 +96,13 @@ class TelegramBot:
         return self._call("getMe")
 
     def send_message(self, chat_id: int, text: str) -> dict:
-        return self._call("sendMessage", chat_id=chat_id, text=text)
+        # Mit Markdown-Formatierung (fett/kursiv); faellt bei Parse-Fehler auf
+        # reinen Text zurueck, damit nie eine Nachricht verloren geht.
+        try:
+            return self._call("sendMessage", chat_id=chat_id, text=text,
+                              parse_mode="Markdown")
+        except HttpError:
+            return self._call("sendMessage", chat_id=chat_id, text=text)
 
     # ------------------------------------------------------------------ #
     # Befehlslogik (rein, testbar)
