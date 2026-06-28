@@ -421,6 +421,24 @@ def cmd_ebay_kaeufe(config: dict, export_path: str = "") -> int:
     return 0
 
 
+def _ebay_wareneinkauf(config: dict, beginn):
+    """Summe der eBay-Kaeufe ab Geschaeftsbeginn (Betriebsausgabe Wareneinkauf)."""
+    from decimal import Decimal, InvalidOperation
+    from src.util import parse_iso, ab_geschaeftsbeginn
+    kaeufe = _lade_json(config.get("pfade", {}).get("ebay_kaeufe_export", "")) or []
+    summe = Decimal("0")
+    for k in kaeufe:
+        d = parse_iso(k.get("date") or k.get("purchase_date"))
+        if not ab_geschaeftsbeginn(d, beginn):
+            continue
+        roh = k.get("price") or k.get("total") or k.get("preis") or "0"
+        try:
+            summe += Decimal(str(roh).replace(",", "."))
+        except InvalidOperation:
+            continue
+    return summe
+
+
 def _ebay_verkaeufe(config: dict):
     """Laedt eBay-Verkaufszeilen aus dem konfigurierten Export (falls vorhanden)."""
     from src.imports import importiere_ebay_verkaeufe
@@ -496,7 +514,9 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     d = schreibe_differenz_journal("data/differenz_journal.csv", journal.differenz_eintraege)
     print(f"  § 25a-Journal -> {d} Margen-Eintraege (data/differenz_journal.csv); "
           f"USt aus Marge {journal.differenz_ust} EUR.")
-    if journal.review_ids:
+    # § 25a betrifft nur die USt — fuer Kleinunternehmer (§19) irrelevant, daher
+    # KEINE Review-Flut wegen fehlender Einkaufsbelege.
+    if journal.review_ids and not ku:
         for sid in journal.review_ids:
             queue.add("Differenzbesteuerung mit unklarem Einkaufsbeleg", bezug=sid)
         print(f"  {len(journal.review_ids)} § 25a-Verkaeufe ohne Einkaufspreis -> Review.")
@@ -544,6 +564,15 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     # EÜR-Übersicht (Einnahmen/Ausgaben je Kategorie).
     euer = euer_uebersicht(sales, receipts, kleinunternehmer=ku, zeitraum="laufend",
                            gewst_freibetrag=Decimal(str(sch.get("gewerbesteuer_freibetrag_eur", 24500))))
+    # eBay-Wareneinkauf ab Geschaeftsbeginn als Betriebsausgabe (Zufluss/Abfluss).
+    wareneinkauf = _ebay_wareneinkauf(config, beginn)
+    if wareneinkauf > 0:
+        euer.ausgaben_je_kategorie["wareneinkauf"] = (
+            euer.ausgaben_je_kategorie.get("wareneinkauf", Decimal("0")) + wareneinkauf)
+        euer.ausgaben_gesamt += wareneinkauf
+        euer.gewinn = euer.einnahmen_gesamt - euer.ausgaben_gesamt
+        euer.hinweise.append("Wareneinkauf vor Gruendung (Einlage) ist hier NICHT enthalten "
+                             "— bitte mit Steuerberater bewerten.")
     schreibe_euer_csv("data/euer_uebersicht.csv", euer)
     print(f"  EÜR: Einnahmen {euer.einnahmen_gesamt} - Ausgaben {euer.ausgaben_gesamt} "
           f"= Gewinn {euer.gewinn} EUR (data/euer_uebersicht.csv).")
