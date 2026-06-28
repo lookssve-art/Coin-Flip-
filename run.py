@@ -1,219 +1,142 @@
 #!/usr/bin/env python3
-"""eBay Arbitrage Bot - Main entry point.
+"""SERO Accounting Agent — CLI-Einstieg (MVP-Demo).
 
-Usage:
-    python run.py          # Run continuously with scheduler
-    python run.py --once   # Single scan, then exit
+Verdrahtet die Compliance-Fundament-Module zu einem nachvollziehbaren Durchlauf.
+Dies ist KEINE Steuerabgabe — alle Ausgaben sind Entwuerfe (siehe Spezifikation
+Abschnitt 0/9/10).
+
+Verwendung:
+    python run.py demo                 # End-to-End-Demo der Module
+    python run.py verfahrensdoku       # Verfahrensdokumentation erzeugen
+    python run.py audit-verify         # Hash-Kette des Audit-Logs pruefen
 """
 
+from __future__ import annotations
+
+import os
 import sys
-import time
-import logging
-import argparse
+from decimal import Decimal
 
-import yaml
-import schedule
+try:
+    import yaml
+except ImportError:  # pragma: no cover - YAML ist optional fuer die Demo
+    yaml = None
 
-from src.scraper.ebay_de_sold import scrape_sold_items, aggregate_sold_items
-from src.scraper.ebay_international import search_international
-from src.scraper.helpers import normalize_title, extract_search_query, extract_core_identifiers
-from src.analyzer.profit_calculator import ProfitCalculator
-from src.analyzer.product_matcher import find_matches
-from src.database.db import get_connection, deal_exists, save_deal, update_search_history
-from src.notifier.discord_webhook import send_deal_notification, send_summary, send_progress
+from src.audit import AuditLog
+from src.review import ReviewQueue, pruefe_review_trigger
+from src.tax import SchwellenMonitor, einzeldifferenz, ustva_vorbereitung
+from src.verfahrensdoku import generiere_verfahrensdoku
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger("arbitrage-bot")
+CONFIG_PATH = "config.yaml"
+EXAMPLE_CONFIG_PATH = "config.example.yaml"
 
 
-def load_config(path="config.yaml"):
-    with open(path, "r") as f:
-        return yaml.safe_load(f)
+def lade_config() -> dict:
+    path = CONFIG_PATH if os.path.exists(CONFIG_PATH) else EXAMPLE_CONFIG_PATH
+    if yaml is None:
+        return _fallback_config()
+    with open(path, "r", encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
 
 
-def run_scan(config):
-    """Execute a full scan cycle."""
-    logger.info("=" * 60)
-    logger.info("Starting arbitrage scan...")
-    logger.info("=" * 60)
+def _fallback_config() -> dict:
+    return {
+        "unternehmen": {"name": "SERO Handel", "finanzamt": "Muenchen",
+                        "bundesland": "Bayern", "rechtsform": "einzelunternehmen",
+                        "gewinnermittlung": "euer"},
+        "steuer": {"kleinunternehmer": True},
+        "aufbewahrung": {"buchungsbelege_jahre": 8, "buecher_jahresabschluss_jahre": 10,
+                         "geschaeftsbriefe_jahre": 6},
+        "pfade": {"audit_log": "audit/audit_log.jsonl", "belegspeicher": "belege/",
+                  "verfahrensdoku": "docs/verfahrensdokumentation.md"},
+        "schwellen": {"warnung_ab_prozent": 80},
+        "review": {"betragsschwelle_eur": 2000},
+    }
 
-    webhook_url = config["discord"]["webhook_url"]
-    queries = config["search"]["queries"]
-    min_sold = config["search"]["min_sold_count"]
-    source_sites = config["markets"]["source_sites"]
 
-    profit_calc = ProfitCalculator(config)
-    conn = get_connection()
+def cmd_demo(config: dict) -> int:
+    print("== SERO Accounting Agent — Demo ==\n")
+    ku = bool(config.get("steuer", {}).get("kleinunternehmer", True))
 
-    total_deals = 0
-    total_items_scanned = 0
-    total_products_found = 0
-    all_deals_summary = []
+    # 1) Audit-Log (append-only, hash-verkettet)
+    log = AuditLog(config["pfade"]["audit_log"])
+    log.append("demo.start", {"hinweis": "Demo-Durchlauf, keine Steuerabgabe"})
 
-    for qi, query in enumerate(queries, 1):
-        logger.info("-" * 40)
-        logger.info("[%d/%d] Scanning query: '%s'", qi, len(queries), query)
+    # 2) Differenzbesteuerung § 25a (Pokemon-Karte aus Privatankauf)
+    marge = einzeldifferenz(Decimal("120"), Decimal("70"), Decimal("19"))
+    print(f"[§25a] Verkauf 120 / Einkauf 70 -> Marge {marge.marge} "
+          f"(netto {marge.netto_marge}, USt {marge.ust_betrag})")
+    log.append("verkauf.differenz", {"marge": str(marge.marge), "ust": str(marge.ust_betrag)})
 
-        # Step 1: Scrape eBay.de sold items
-        sold_items = scrape_sold_items(query, config)
-        total_items_scanned += len(sold_items)
+    # 3) Schwellen-Monitoring mit Fruehwarnung
+    mon = SchwellenMonitor(warnung_ab_prozent=Decimal(str(
+        config.get("schwellen", {}).get("warnung_ab_prozent", 80))))
+    status = mon.kleinunternehmer_laufend(Decimal("85000"))
+    flag = "WARNUNG" if status.warnung else "ok"
+    print(f"[Schwelle] KU laufend {status.aktuell}/{status.grenze} EUR "
+          f"= {status.prozent}% [{flag}]")
 
-        if not sold_items:
-            logger.info("No sold items found for '%s', skipping", query)
-            send_progress(webhook_url, query, 0, 0, qi, len(queries))
-            update_search_history(conn, query, 0)
-            continue
-
-        # Step 2: Aggregate by product using fuzzy matching
-        products = aggregate_sold_items(sold_items, min_sold_count=min_sold)
-        total_products_found += len(products)
-
-        logger.info(
-            "Found %d products sold >= %d times from %d items for '%s'",
-            len(products), min_sold, len(sold_items), query,
-        )
-
-        # Send progress to Discord
-        send_progress(webhook_url, query, len(sold_items), len(products), qi, len(queries))
-
-        if not products:
-            update_search_history(conn, query, 0)
-            continue
-
-        # Step 3: For each popular product, search internationally
-        for product in products[:20]:  # Top 20 per query
-            logger.info(
-                ">>> Product: '%s' (sold %dx, avg EUR %.2f, range EUR %.2f-%.2f)",
-                product.title[:70], product.sold_count, product.avg_price,
-                product.min_price, product.max_price,
-            )
-
-            # Strategy 1: Search with cleaned-up title (remove German filler words)
-            search_query = extract_search_query(product.title)
-            logger.info("International search (cleaned): '%s'", search_query)
-            intl_listings = search_international(search_query, source_sites, config)
-
-            # Strategy 2: If no results, try with core identifiers only
-            if not intl_listings:
-                core_query = extract_core_identifiers(product.title)
-                if core_query and core_query != search_query:
-                    logger.info("No results, trying core identifiers: '%s'", core_query)
-                    intl_listings = search_international(core_query, source_sites, config)
-
-            # Strategy 3: If still no results, try first 5 words of original title
-            if not intl_listings:
-                words = product.title.split()[:5]
-                short_query = " ".join(words)
-                if short_query != search_query:
-                    logger.info("No results, trying short query: '%s'", short_query)
-                    intl_listings = search_international(short_query, source_sites, config)
-
-            if not intl_listings:
-                logger.info("No international listings found for any search strategy")
-                continue
-
-            logger.info("Found %d international listings", len(intl_listings))
-
-            # Step 4: Find matches and calculate profit
-            matches = find_matches(product, intl_listings, config, profit_calc)
-
-            if not matches:
-                logger.info("No profitable matches found")
-                continue
-
-            logger.info("Found %d profitable matches!", len(matches))
-
-            for listing, deal_info, similarity in matches[:5]:  # Top 5 per product
-                norm = normalize_title(product.title)
-
-                # Check if we already notified about this deal
-                if deal_exists(conn, norm, listing.site_id, listing.url):
-                    logger.info("Deal already notified, skipping")
-                    continue
-
-                # Step 5: Send Discord notification
-                logger.info(
-                    "*** DEAL: %s | Profit: EUR %.2f (%.1f%%) | Source: %s ***",
-                    product.title[:50], deal_info["profit_eur"],
-                    deal_info["profit_percent"], listing.site_id,
-                )
-
-                send_deal_notification(webhook_url, product, listing, deal_info)
-
-                # Save to database
-                save_deal(conn, {
-                    "product_title": product.title,
-                    "normalized_title": norm,
-                    "source_site": listing.site_id,
-                    "buy_price": listing.price,
-                    "buy_currency": listing.currency,
-                    "sell_price_eur": product.avg_price,
-                    "profit_eur": deal_info["profit_eur"],
-                    "profit_percent": deal_info["profit_percent"],
-                    "buy_url": listing.url,
-                    "sell_url": product.sample_url,
-                })
-
-                total_deals += 1
-                all_deals_summary.append({
-                    "title": product.title,
-                    "profit": deal_info["profit_eur"],
-                    "profit_pct": deal_info["profit_percent"],
-                })
-
-                # Small delay between Discord messages
-                time.sleep(1.5)
-
-        update_search_history(conn, query, len(products))
-
-    # Send summary
-    send_summary(
-        webhook_url, len(queries), total_deals, all_deals_summary,
-        total_items_scanned=total_items_scanned,
-        total_products_found=total_products_found,
+    # 4) Review-Queue (Human-in-the-Loop)
+    queue = ReviewQueue()
+    gruende = pruefe_review_trigger(
+        schwelle_naht=status.warnung,
+        betrag_brutto=Decimal("2500"),
+        betragsschwelle=Decimal(str(config.get("review", {}).get("betragsschwelle_eur", 2000))),
     )
+    queue.add_many(gruende, bezug="demo-vorgang-1")
+    print(f"[Review] {len(queue.offen())} offene Faelle: "
+          f"{', '.join(i.grund for i in queue.offen()) or 'keine'}")
+    log.append("review.erstellt", {"anzahl": len(queue.offen())})
 
-    conn.close()
-    logger.info("=" * 60)
-    logger.info(
-        "Scan complete. Scanned %d items, found %d products, %d deals.",
-        total_items_scanned, total_products_found, total_deals,
+    # 5) USt-VA-Vorbereitung (Entwurf!)
+    report = ustva_vorbereitung(
+        "Q2/2026", kleinunternehmer=ku,
+        umsatzsteuer_je_satz={"19": Decimal("190")},
+        differenz_ust=marge.ust_betrag, vorsteuer=Decimal("0"),
     )
-    logger.info("=" * 60)
+    if ku:
+        print(f"[USt-VA] {report.zeitraum}: {report.hinweise[0]}")
+    else:
+        print(f"[USt-VA] {report.zeitraum}: Zahllast {report.zahllast} EUR (ENTWURF)")
+
+    # 6) Audit-Kette pruefen
+    ok, fehler = log.verify()
+    print(f"\n[Audit] {log.count()} Eintraege, Kette {'intakt' if ok else f'BRUCH @ {fehler}'}")
+    return 0 if ok else 1
 
 
-def main():
-    parser = argparse.ArgumentParser(description="eBay Arbitrage Bot")
-    parser.add_argument("--once", action="store_true", help="Run once then exit")
-    parser.add_argument("--config", default="config.yaml", help="Config file path")
-    args = parser.parse_args()
+def cmd_verfahrensdoku(config: dict) -> int:
+    md = generiere_verfahrensdoku(config)
+    out = config.get("pfade", {}).get("verfahrensdoku", "docs/verfahrensdokumentation.md")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, "w", encoding="utf-8") as fh:
+        fh.write(md)
+    print(f"Verfahrensdokumentation geschrieben: {out} ({len(md)} Zeichen)")
+    return 0
 
-    config = load_config(args.config)
-    logger.info("Config loaded. %d search queries configured.", len(config["search"]["queries"]))
 
-    if args.once:
-        run_scan(config)
-        return
+def cmd_audit_verify(config: dict) -> int:
+    log = AuditLog(config["pfade"]["audit_log"])
+    ok, fehler = log.verify()
+    print(f"Audit-Log: {log.count()} Eintraege — "
+          f"{'Kette intakt' if ok else f'KETTENBRUCH bei Eintrag {fehler}'}")
+    return 0 if ok else 1
 
-    # Scheduled mode
-    interval = config.get("scheduler", {}).get("interval_hours", 4)
-    logger.info("Starting scheduler. Scanning every %d hours.", interval)
 
-    # Run immediately on start
-    run_scan(config)
+COMMANDS = {
+    "demo": cmd_demo,
+    "verfahrensdoku": cmd_verfahrensdoku,
+    "audit-verify": cmd_audit_verify,
+}
 
-    # Then schedule
-    schedule.every(interval).hours.do(run_scan, config)
 
-    while True:
-        schedule.run_pending()
-        time.sleep(60)
+def main(argv: list[str]) -> int:
+    cmd = argv[1] if len(argv) > 1 else "demo"
+    if cmd in ("-h", "--help", "help") or cmd not in COMMANDS:
+        print(__doc__)
+        return 0 if cmd in ("-h", "--help", "help") else 2
+    return COMMANDS[cmd](lade_config())
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main(sys.argv))

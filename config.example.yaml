@@ -1,0 +1,53 @@
+# SERO Accounting Agent — Beispielkonfiguration
+# Kopiere diese Datei nach `config.yaml` und passe die Werte an.
+# `config.yaml` ist in .gitignore (enthaelt Mandanten-/Steuerparameter).
+
+unternehmen:
+  name: "SERO Handel (Einzelunternehmen)"
+  finanzamt: "Muenchen"
+  bundesland: "Bayern"
+  rechtsform: "einzelunternehmen"       # einzelunternehmen | personengesellschaft
+  gewinnermittlung: "euer"               # euer (Ist-Prinzip) | bilanz
+
+steuer:
+  # Kleinunternehmer nach § 19 UStG. Bei false: Regelbesteuerung (Vorsteuerabzug,
+  # bindet 5 Jahre). Der Agent warnt aktiv vor Ueberschreiten der Schwellen.
+  kleinunternehmer: true
+  ust_id: ""                             # USt-IdNr (BZSt) — fuer eBay-EU-Verkaeufe Pflicht
+  oss_registriert: false                 # One-Stop-Shop beim BZSt aktiv?
+  ustva_rhythmus: "quartal"              # monat | quartal | jahr
+  dauerfristverlaengerung: false
+
+schwellen:
+  # Frühwarnung loest REVIEW_REQUIRED aus, sobald `warnung_ab_prozent` erreicht ist.
+  kleinunternehmer_vorjahr_eur: 25000    # § 19 UStG, Vorjahr (netto)
+  kleinunternehmer_laufend_eur: 100000   # § 19 UStG, laufendes Jahr (harte Grenze)
+  oss_fernverkauf_eur: 10000             # EU-weite Lieferschwelle (§25a-Ware ausgenommen)
+  gewerbesteuer_freibetrag_eur: 24500    # Gewinn-Freibetrag Einzelunternehmer
+  warnung_ab_prozent: 80
+
+review:
+  # Buchungen oberhalb dieser Bruttoschwelle gehen immer in die Review-Queue.
+  betragsschwelle_eur: 2000
+
+aufbewahrung:
+  # Sicherheitsregel: im Zweifel 10 Jahre. Belege/Rechnungen = 8 Jahre.
+  buchungsbelege_jahre: 8
+  buecher_jahresabschluss_jahre: 10
+  geschaeftsbriefe_jahre: 6
+
+pfade:
+  audit_log: "audit/audit_log.jsonl"     # append-only, hash-verkettet
+  belegspeicher: "belege/"               # WORM / versioniert
+  verfahrensdoku: "docs/verfahrensdokumentation.md"
+
+# --- Integrationen (Platzhalter; in spaeteren MVP-Stufen aktiviert) ---
+integrationen:
+  lexware_office:
+    base_url: "https://api.lexoffice.io/v1"
+    api_key: ""                          # laeuft ab -> erneuern
+    rate_limit_rps: 2                    # HTTP 429 -> Backoff/Queue
+    finalize_belege: false               # API legt default Drafts an
+  ebay: { app_id: "", cert_id: "", token: "" }
+  bank: { provider: "qonto", api_key: "" }   # qonto | finom | aggregator
+  ocr: { provider: "textract", region: "eu-central-1" }

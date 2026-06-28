@@ -1,6 +1,9 @@
-requests>=2.31.0
-beautifulsoup4>=4.12.0
-pyyaml>=6.0
-schedule>=1.2.0
-fake-useragent>=1.4.0
-curl_cffi>=0.7.0
+# Laufzeit-Kern: bewusst stdlib-nah gehalten (Compliance-Fundament soll ohne
+# schwere Abhaengigkeiten lauffaehig und pruefbar sein).
+PyYAML>=6.0          # Konfiguration
+
+# --- Optional / spaetere MVP-Stufen (auskommentiert, bis benoetigt) ---
+# requests>=2.31.0          # API-Clients (Lexware, eBay, Bank-Aggregator)
+# lxml>=5.0                 # robustes XRechnung/ZUGFeRD-XML-Parsing
+# psycopg[binary]>=3.1      # PostgreSQL (Prod statt SQLite)
+# python-dateutil>=2.9      # Datums-/Quartalslogik

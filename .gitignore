@@ -1,3 +1,22 @@
-data/deals.db
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Local data / secrets
+config.yaml
+data/
+*.sqlite
+*.db
+
+# Belegspeicher (WORM) — niemals committen
+belege/
+audit/*.jsonl
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
