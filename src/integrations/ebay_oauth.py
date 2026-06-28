@@ -90,8 +90,16 @@ class EbayOAuth:
         return f"{_AUTH_BASE[self.environment]}?{urllib.parse.urlencode(params)}"
 
     def exchange_code(self, code: str) -> TokenResponse:
-        """Tauscht den Authorization-Code gegen Access- + Refresh-Token."""
-        # eBay liefert den Code URL-encodiert in der Redirect-URL; hier roh erwartet.
+        """Tauscht den Authorization-Code gegen Access- + Refresh-Token.
+
+        eBay liefert den Code in der Redirect-URL URL-encodiert; wir dekodieren ihn,
+        damit man die ganze ``code=...``-Angabe einfach hineinkopieren kann.
+        """
+        code = urllib.parse.unquote(code.strip())
+        # Falls die ganze Redirect-URL eingefuegt wurde: nur den code-Parameter nehmen.
+        if "code=" in code:
+            code = code.split("code=", 1)[1].split("&", 1)[0]
+            code = urllib.parse.unquote(code)
         data = self._poster(
             _TOKEN_URL[self.environment],
             {"grant_type": "authorization_code", "code": code, "redirect_uri": self.ru_name},
