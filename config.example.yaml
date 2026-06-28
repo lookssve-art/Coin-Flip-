@@ -74,7 +74,8 @@ integrationen:
     cert_id: ""                          # Client Secret
     ru_name: ""                          # RuName (Redirect-URL-Name) aus Developer Portal
     marketplace_id: "EBAY_DE"
-    refresh_token: ""                    # via `python run.py ebay-token <code>` erzeugen
+    refresh_token: ""                    # dauerhaft (~18 Monate); via `ebay-token <code>`
+    access_token: ""                     # optional: kurzlebiger User-Token (~2h) als Fallback
   bank:
     provider: "lexware_csv"              # Lexware Office = Geschaeftskonto -> CSV-Export
     csv_mapping: {}                      # optional: {date: "...", amount: "...", text: "..."}

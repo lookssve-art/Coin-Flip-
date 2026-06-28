@@ -21,6 +21,8 @@ Verwendung:
     python run.py sync <belege> <csv>  # End-to-End: Belege+Bank -> Reconciliation -> Journal
     python run.py run-all               # Voller Pipeline-Durchlauf (kaeufe->sync->verbuchung)
     python run.py serve                 # Autonomer Dauerbetrieb: Bot + Pipeline im Takt
+    python run.py check                 # Setup-Diagnose: was ist konfiguriert, was fehlt
+    python run.py lexware-kategorien    # Lexware-Kategorie-UUIDs auflisten (fuer kategorie_map)
 """
 
 from __future__ import annotations
@@ -229,12 +231,19 @@ def cmd_ebay_sync(config: dict, tage: str = "30") -> int:
     oauth, e = _ebay_oauth(config)
     if oauth is None:
         return 2
-    if not e.get("refresh_token"):
-        print("Kein refresh_token in config.yaml — zuerst `ebay-auth` + `ebay-token` ausfuehren.")
-        return 2
     try:
-        tok = oauth.refresh(e["refresh_token"])
-        client = EbayFinanceClient(access_token=tok.access_token,
+        if e.get("refresh_token"):
+            # Bevorzugt: dauerhafter Refresh-Token -> frischer Access-Token.
+            access_token = oauth.refresh(e["refresh_token"]).access_token
+        elif e.get("access_token"):
+            # Fallback: direkt hinterlegter User-Access-Token (kurzlebig, ~2 h!).
+            print("Hinweis: nutze access_token direkt (laeuft ~2h ab). "
+                  "Fuer Dauerbetrieb refresh_token via `ebay-auth`/`ebay-token` hinterlegen.")
+            access_token = e["access_token"]
+        else:
+            print("Kein refresh_token/access_token in config.yaml — `ebay-auth` + `ebay-token` ausfuehren.")
+            return 2
+        client = EbayFinanceClient(access_token=access_token,
                                    marketplace_id=e.get("marketplace_id", "EBAY_DE"),
                                    environment=e.get("environment", "production"))
         ende = date.today()
@@ -475,6 +484,85 @@ def cmd_lexware_push(config: dict, belege_dir: str = "") -> int:
     return 0 if not res.fehler else 1
 
 
+def cmd_check(config: dict) -> int:
+    """Setup-Diagnose: zeigt pro Bereich, was konfiguriert ist und was noch fehlt."""
+    integ = config.get("integrationen", {})
+    ebay = integ.get("ebay", {})
+    lex = integ.get("lexware_office", {})
+    tg = config.get("interface", {}).get("telegram", {})
+    llm = integ.get("llm", {})
+    pfade = config.get("pfade", {})
+    steuer = config.get("steuer", {})
+    kat = {k: v for k, v in (lex.get("kategorie_map") or {}).items() if v}
+
+    def zeile(ok: bool, label: str, hinweis: str = "") -> str:
+        mark = "✓" if ok else "✗"
+        return f"  [{mark}] {label}" + (f" — {hinweis}" if (hinweis and not ok) else "")
+
+    print("== Setup-Check ==\n")
+    print("Stammdaten / Steuer:")
+    print(zeile(bool(config.get("unternehmen", {}).get("geschaeftsbeginn")),
+               f"Geschaeftsbeginn: {config.get('unternehmen', {}).get('geschaeftsbeginn', '—')}"))
+    print(zeile(True, f"Kleinunternehmer (§19): {steuer.get('kleinunternehmer')}"))
+    print(zeile(bool(steuer.get("ust_id")), "USt-IdNr", "beim BZSt beantragen (eBay-EU Pflicht)"))
+
+    print("\neBay (Verkaeufe + § 25a-Einkaufspreise):")
+    print(zeile(bool(ebay.get("app_id") and ebay.get("cert_id")), "App-ID + Cert-ID"))
+    print(zeile(bool(ebay.get("ru_name")), "RuName", "aus Developer Portal eintragen"))
+    if ebay.get("refresh_token"):
+        print(zeile(True, "Refresh-Token (dauerhaft)"))
+    elif ebay.get("access_token"):
+        print(zeile(True, "Access-Token hinterlegt (⏳ ~2h — fuer Dauerbetrieb refresh_token holen)"))
+    else:
+        print(zeile(False, "Refresh-/Access-Token", "ebay-auth -> ebay-token <code> ausfuehren"))
+    print(zeile(os.path.exists(pfade.get("ebay_kaeufe_export", "")), "Kaufhistorie-Export",
+               f"nach {pfade.get('ebay_kaeufe_export', 'data/ebay_kaeufe.json')} exportieren"))
+
+    print("\nLexware Office (Konto + Buchung):")
+    print(zeile(bool(lex.get("api_key")), "API-Key"))
+    print(zeile(bool(kat), f"kategorie_map ({len(kat)} UUIDs)",
+               "via `lexware-kategorien` holen + eintragen"))
+    print(zeile(os.path.exists(pfade.get("bank_csv", "")), "Konto-CSV (Inbox)",
+               f"Umsaetze nach {pfade.get('bank_csv', 'inbox/kontoumsaetze.csv')} exportieren"))
+    print(zeile(os.path.isdir(pfade.get("belege_inbox", "")), "Beleg-Inbox",
+               f"Ordner {pfade.get('belege_inbox', 'inbox/belege/')} anlegen"))
+
+    print("\nInterfaces:")
+    print(zeile(bool(tg.get("token")), "Telegram-Token"))
+    print(zeile(bool(tg.get("allowed_user_ids")), "Telegram allowed_user_ids",
+               "Bot anschreiben -> nennt deine ID"))
+    print(zeile(bool(llm.get("api_key")), "Claude-API-Key",
+               "optional: gegroundete /duden-Antworten + bessere Klassifikation"))
+
+    fehlt = []
+    if not ebay.get("ru_name"): fehlt.append("eBay RuName")
+    if not ebay.get("refresh_token"): fehlt.append("eBay Refresh-Token")
+    if not kat: fehlt.append("Lexware kategorie_map")
+    if not os.path.exists(pfade.get("bank_csv", "")): fehlt.append("Konto-CSV")
+    if not tg.get("allowed_user_ids"): fehlt.append("Telegram User-ID")
+    print("\n" + ("✓ Alles Noetige vorhanden — `run.py run-all` ist startklar."
+                  if not fehlt else f"Noch offen: {', '.join(fehlt)}"))
+    return 0
+
+
+def cmd_lexware_kategorien(config: dict) -> int:
+    """Listet die Lexware-Buchungskategorien (UUID + Name) fuer die kategorie_map."""
+    client, _ = _lexware_client(config)
+    if client is None:
+        return 2
+    try:
+        data = client._request("GET", "/posting-categories")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Abruf /posting-categories fehlgeschlagen: {exc}")
+        return 1
+    eintraege = data if isinstance(data, list) else data.get("content", [])
+    print("Lexware-Buchungskategorien (UUID — Name [Typ]):\n")
+    for k in eintraege:
+        print(f"  {k.get('id')}  —  {k.get('name')} [{k.get('type', '?')}]")
+    print("\nPassende UUIDs in config.yaml unter integrationen.lexware_office.kategorie_map eintragen.")
+    return 0
+
+
 def _schritt(name: str, fn) -> bool:
     """Fuehrt einen Pipeline-Schritt robust aus (Fehler brechen den Lauf nicht ab)."""
     print(f"\n▶ {name}")
@@ -564,6 +652,8 @@ COMMANDS = {
     "lexware-push": cmd_lexware_push,
     "run-all": cmd_run_all,
     "serve": cmd_serve,
+    "check": cmd_check,
+    "lexware-kategorien": cmd_lexware_kategorien,
 }
 
 
