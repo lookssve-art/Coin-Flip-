@@ -8,9 +8,12 @@ Reconciliation-Logik bleibt dadurch ohne Live-Credentials testbar.
 
 from .bank import importiere_bank_transaktionen, idempotency_key
 from .ebay import importiere_ebay_verkaeufe
+from .lexware_bank import importiere_lexware_bank, lese_lexware_bank_csv
 
 __all__ = [
     "importiere_bank_transaktionen",
     "idempotency_key",
     "importiere_ebay_verkaeufe",
+    "importiere_lexware_bank",
+    "lese_lexware_bank_csv",
 ]

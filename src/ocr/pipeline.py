@@ -109,8 +109,10 @@ class BelegPipeline:
         klass = self.classifier.classify(haendler, haendler=haendler)
         netto = (brutto - ust) if brutto else Decimal("0")
         ust_satz = _satz_aus_betraegen(netto, ust)
+        rechnungsdatum = _parse_iso_datum(
+            (res.felder.get("rechnungsdatum") if res else None)) or date.today()
         return Receipt(
-            id=beleg_id, datum=date.today(), haendler=haendler,
+            id=beleg_id, datum=rechnungsdatum, haendler=haendler,
             brutto=Decimal(brutto), netto=netto, ust_satz=ust_satz, ust_betrag=Decimal(ust),
             kategorie=klass.kategorie, vorsteuer_abzug=klass.vorsteuer_abzug,
             ocr_confidence=confidence,
@@ -148,6 +150,16 @@ def _suffix_fuer(fmt: EInvoiceFormat, mime: str) -> str:
     if "jpeg" in mime or "jpg" in mime:
         return ".jpg"
     return ""
+
+
+def _parse_iso_datum(value) -> Optional[date]:
+    if not value:
+        return None
+    try:
+        from datetime import datetime
+        return datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
 
 
 def _satz_aus_betraegen(netto: Decimal, ust: Decimal) -> Decimal:

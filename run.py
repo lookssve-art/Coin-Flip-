@@ -14,6 +14,10 @@ Verwendung:
     python run.py ebay-auth            # eBay-Consent-URL ausgeben (OAuth-Flow starten)
     python run.py ebay-token <code>    # Authorization-Code gegen Refresh-Token tauschen
     python run.py ebay-sync [tage]     # eBay-Transaktionen abrufen + Reconciliation-Import
+    python run.py lexware-ping         # Lexware-API-Key verifizieren (/profile)
+    python run.py bank-import <csv>    # Lexware-Geschaeftskonto-CSV importieren
+    python run.py lexware-push <dir>   # Belege aus <dir> als Draft-Vouchers nach Lexware
+    python run.py sync <belege> <csv>  # End-to-End: Belege+Bank -> Reconciliation -> Journal
 """
 
 from __future__ import annotations
@@ -240,6 +244,130 @@ def cmd_ebay_sync(config: dict, tage: str = "30") -> int:
     return 0
 
 
+def _lexware_client(config: dict):
+    from src.export.lexware import LexwareClient, RateLimiter
+    lo = config.get("integrationen", {}).get("lexware_office", {})
+    if not lo.get("api_key"):
+        print("Kein Lexware-API-Key in config.yaml (integrationen.lexware_office.api_key).")
+        return None, lo
+    client = LexwareClient(
+        api_key=lo["api_key"], base_url=lo.get("base_url", "https://api.lexoffice.io/v1"),
+        finalize_belege=bool(lo.get("finalize_belege", False)),
+        rate_limiter=RateLimiter(max_pro_sekunde=float(lo.get("rate_limit_rps", 2))),
+    )
+    return client, lo
+
+
+def cmd_lexware_ping(config: dict) -> int:
+    client, _ = _lexware_client(config)
+    if client is None:
+        return 2
+    try:
+        profil = client.ping()
+    except Exception as exc:  # noqa: BLE001
+        print(f"Lexware /profile fehlgeschlagen: {exc}")
+        return 1
+    print(f"Lexware OK: {profil.get('companyName', '?')} "
+          f"(Mandant {profil.get('organizationId', '?')})")
+    return 0
+
+
+def _bank_transaktionen(config: dict, csv_path: str):
+    from src.imports import importiere_lexware_bank
+    mapping = config.get("integrationen", {}).get("bank", {}).get("csv_mapping") or None
+    return importiere_lexware_bank(csv_path, mapping=mapping)
+
+
+def cmd_bank_import(config: dict, csv_path: str = "") -> int:
+    if not csv_path:
+        print("Bitte CSV-Pfad angeben: python run.py bank-import <csv>")
+        return 2
+    try:
+        txs = _bank_transaktionen(config, csv_path)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Bankimport fehlgeschlagen: {exc}")
+        return 1
+    einnahmen = sum(1 for t in txs if t.betrag > 0)
+    print(f"Bankimport: {len(txs)} Transaktionen ({einnahmen} Einnahmen, "
+          f"{len(txs) - einnahmen} Ausgaben).")
+    return 0
+
+
+def _ocr_belege(config: dict, belege_dir: str):
+    """Verarbeitet alle Dateien in belege_dir durch die Beleg-Pipeline."""
+    from src.ocr import BelegPipeline
+    from src.review import ReviewQueue
+    from src.storage import ReceiptStore
+    store = ReceiptStore(config.get("pfade", {}).get("belegspeicher", "belege/"))
+    queue = ReviewQueue()
+    pipeline = BelegPipeline(store=store, review_queue=queue)
+    receipts = []
+    for name in sorted(os.listdir(belege_dir)):
+        pfad = os.path.join(belege_dir, name)
+        if not os.path.isfile(pfad):
+            continue
+        with open(pfad, "rb") as fh:
+            content = fh.read()
+        mime = "application/xml" if name.endswith(".xml") else "application/pdf"
+        receipts.append(pipeline.verarbeite(content, mime=mime))
+    return receipts, queue
+
+
+def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
+    from decimal import Decimal
+    from src.reconciliation import Reconciler, MatchStatus
+    from src.export import schreibe_buchungsjournal
+    from src.tax import ustva_vorbereitung
+    if not belege_dir or not csv_path:
+        print("Verwendung: python run.py sync <belege_dir> <bank_csv>")
+        return 2
+    try:
+        receipts, queue = _ocr_belege(config, belege_dir)
+        txs = _bank_transaktionen(config, csv_path)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Sync fehlgeschlagen: {exc}")
+        return 1
+    ergebnisse = Reconciler().reconcile(txs, receipts)
+    os.makedirs("data", exist_ok=True)
+    n = schreibe_buchungsjournal("data/buchungsjournal.csv", ergebnisse)
+    offen = sum(1 for r in ergebnisse if r.status == MatchStatus.REVIEW_REQUIRED)
+    unmatched = sum(1 for r in ergebnisse if r.status == MatchStatus.UNMATCHED)
+    print(f"Sync: {len(receipts)} Belege, {len(txs)} Banktransaktionen.")
+    print(f"  Reconciliation -> {n} Zeilen (data/buchungsjournal.csv); "
+          f"{offen} Review, {unmatched} ohne Beleg.")
+    print(f"  Review-Queue (Belege): {len(queue.offen())} offen.")
+    ku = bool(config.get("steuer", {}).get("kleinunternehmer", True))
+    report = ustva_vorbereitung("laufend", kleinunternehmer=ku)
+    print(f"  USt-VA: {report.hinweise[0] if report.hinweise else 'Entwurf erstellt'}")
+    return 0
+
+
+def cmd_lexware_push(config: dict, belege_dir: str = "") -> int:
+    from src.integrations import LexwareSync
+    if not belege_dir:
+        print("Bitte Belege-Verzeichnis angeben: python run.py lexware-push <dir>")
+        return 2
+    client, lo = _lexware_client(config)
+    if client is None:
+        return 2
+    kategorie_map = {k: v for k, v in (lo.get("kategorie_map") or {}).items() if v}
+    if not kategorie_map:
+        print("WARNUNG: kategorie_map leer — keine Belege werden gepusht. "
+              "Lexware-Kategorie-UUIDs in config.yaml eintragen.")
+    try:
+        receipts, queue = _ocr_belege(config, belege_dir)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Belegverarbeitung fehlgeschlagen: {exc}")
+        return 1
+    sync = LexwareSync(client=client, kategorie_map=kategorie_map, review_queue=queue)
+    res = sync.push_belege(receipts)
+    print(f"Lexware-Push: {len(res.erstellt)} Draft-Vouchers erstellt, "
+          f"{len(res.uebersprungen)} uebersprungen, {len(res.fehler)} Fehler.")
+    for beleg_id, grund in res.uebersprungen[:10]:
+        print(f"  - {beleg_id}: {grund}")
+    return 0 if not res.fehler else 1
+
+
 COMMANDS = {
     "demo": cmd_demo,
     "verfahrensdoku": cmd_verfahrensdoku,
@@ -249,6 +377,10 @@ COMMANDS = {
     "ebay-auth": cmd_ebay_auth,
     "ebay-token": cmd_ebay_token,
     "ebay-sync": cmd_ebay_sync,
+    "lexware-ping": cmd_lexware_ping,
+    "bank-import": cmd_bank_import,
+    "sync": cmd_sync,
+    "lexware-push": cmd_lexware_push,
 }
 
 

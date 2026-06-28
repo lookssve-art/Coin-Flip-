@@ -98,6 +98,7 @@ class TestPipeline(unittest.TestCase):
             self.assertEqual(receipt.brutto, Decimal("119.00"))
             self.assertEqual(receipt.ust_betrag, Decimal("19.00"))
             self.assertEqual(receipt.ust_satz, Decimal("19"))
+            self.assertEqual(receipt.datum, date(2026, 6, 1))   # IssueDate, nicht heute
             self.assertEqual(receipt.ocr_confidence, 1.0)  # strukturiert, kein OCR-Risiko
 
 

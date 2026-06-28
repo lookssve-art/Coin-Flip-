@@ -92,6 +92,31 @@ durch den read-only Importer. Unklare Transaktionstypen werden markiert, nicht g
 > lokal/auf dem Zielserver ausführen. Die Clients sind über injizierbares HTTP
 > vollständig offline getestet.
 
+## Lexware Office — Bank + Buchungs-Push (live)
+
+Lexware Office ist hier zugleich das **Geschäftskonto**. Kontoumsätze werden als
+**CSV-Export** importiert (die öffentliche API liefert keine Roh-Transaktionen);
+Belege werden als **Draft-Vouchers** zurückgeschrieben (Festschreibung bleibt manuell).
+
+```bash
+python run.py lexware-ping              # API-Key prüfen (/profile)
+python run.py bank-import umsaetze.csv  # Geschäftskonto-CSV importieren
+python run.py sync ./belege umsaetze.csv  # Belege+Bank → Reconciliation → data/buchungsjournal.csv + USt-VA-Entwurf
+python run.py lexware-push ./belege     # Belege als Draft-Vouchers nach Lexware (live)
+```
+
+`lexware-push` mappt jede interne Kategorie über `integrationen.lexware_office.kategorie_map`
+(Lexware-Kategorie-UUIDs aus `/posting-categories`) auf einen Voucher; Belege ohne
+Mapping, mit unsicherer Vorsteuer oder offener Review werden **übersprungen**, nicht gebucht.
+
+| Modul | Inhalt |
+|---|---|
+| [`src/imports/lexware_bank.py`](src/imports/lexware_bank.py) | Geschäftskonto-CSV (tolerant) → idempotente Bank-Transaktionen |
+| [`src/integrations/lexware_sync.py`](src/integrations/lexware_sync.py) | Receipts → Lexware Draft-Vouchers (Kategorie-Mapping, Review-Gate) |
+
+> Hinweis: `api.lexoffice.io` braucht ausgehenden Zugriff (in dieser Sandbox gesperrt);
+> lokal/auf dem Zielserver ausführen. Logik ist über injizierbares HTTP offline getestet.
+
 ## Schnellstart
 
 ```bash

@@ -205,6 +205,8 @@ Erzeugt jederzeit: Umsatzübersicht (Monat/Jahr), **USt-VA-Vorbereitung** (Zahll
 | 1 — Audit-Log (append-only, hash-verkettet) | ✅ | `src/audit/audit_log.py` |
 | 1 — Beleg-Storage (WORM, inhaltsadressiert) | ✅ | `src/storage/receipt_store.py` |
 | 2 — Bank/eBay-Import (read-only) | ✅ | `src/imports/bank.py`, `src/imports/ebay.py` |
+| 2 — Lexware-Bankimport (Geschäftskonto-CSV) | ✅ | `src/imports/lexware_bank.py` |
+| 2 — eBay Live-Anbindung (OAuth + Finances) | ✅ | `src/integrations/ebay_oauth.py`, `src/integrations/ebay_finance.py` |
 | 2 — Reconciliation-Grundlogik | ✅ | `src/reconciliation/engine.py` |
 | 3 — OCR-Pipeline (Extraktion + Klassifikation) | ✅ | `src/ocr/pipeline.py`, `src/ocr/extract.py`, `src/ocr/classify.py` |
 | 3 — Claude-Klassifikator (Opus 4.8, optional) | ✅ | `src/ocr/classify.py` (`ClaudeClassifier`) |
@@ -212,6 +214,7 @@ Erzeugt jederzeit: Umsatzübersicht (Monat/Jahr), **USt-VA-Vorbereitung** (Zahll
 | 4 — Differenzbesteuerung § 25a (Einzel-/Gesamtdifferenz) | ✅ | `src/tax/differenzbesteuerung.py` |
 | 5 — E-Rechnungs-Empfang (XRechnung/ZUGFeRD) | ✅ (Basis) | `src/einvoice/parser.py` |
 | 6 — Lexware-Export (Draft-Voucher, Rate-Limit-Backoff) | ✅ | `src/export/lexware.py` |
+| 6 — Lexware-Push (Belege → Draft-Vouchers, live) | ✅ | `src/integrations/lexware_sync.py` |
 | 6 — DATEV-/CSV-Journal (offline) | ✅ | `src/export/datev_csv.py` |
 | 7 — USt-VA-/EÜR-Vorbereitung | ✅ (USt-VA) | `src/tax/ustva.py` |
 | 7 — Schwellen-Monitoring 25k/100k/10k | ✅ | `src/tax/schwellen.py` |

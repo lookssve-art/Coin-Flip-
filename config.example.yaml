@@ -49,6 +49,13 @@ integrationen:
     api_key: ""                          # laeuft ab -> erneuern
     rate_limit_rps: 2                    # HTTP 429 -> Backoff/Queue
     finalize_belege: false               # API legt default Drafts an (Festschreibung = manuell)
+    kategorie_map:                       # interne Kategorie -> Lexware-Kategorie-UUID
+      wareneinkauf: ""
+      buero: ""
+      software: ""
+      versand: ""
+      werbung: ""
+      gebuehren: ""
   ebay:
     konto_typ: "gewerblich"              # gewerblich | privat
     environment: "production"            # production | sandbox
@@ -58,7 +65,9 @@ integrationen:
     ru_name: ""                          # RuName (Redirect-URL-Name) aus Developer Portal
     marketplace_id: "EBAY_DE"
     refresh_token: ""                    # via `python run.py ebay-token <code>` erzeugen
-  bank: { provider: "qonto", api_key: "" }   # qonto | finom | aggregator
+  bank:
+    provider: "lexware_csv"              # Lexware Office = Geschaeftskonto -> CSV-Export
+    csv_mapping: {}                      # optional: {date: "...", amount: "...", text: "..."}
   ocr: { provider: "textract", region: "eu-central-1" }
   llm:
     provider: "anthropic"                # Klassifikation/Orchestrierung
