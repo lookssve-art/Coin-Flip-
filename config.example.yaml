@@ -48,10 +48,15 @@ pfade:
   einkaufspreise: "data/einkaufspreise.json"  # {product_id: preis} fuer § 25a
   belege_inbox: "inbox/belege/"          # autonomer Betrieb: Belege hier ablegen
   bank_csv: "inbox/kontoumsaetze.csv"    # autonomer Betrieb: Lexware-Konto-CSV
+  ausgaben_csv: "inbox/ausgaben.csv"     # echte Rechnungen (datum;kategorie;betrag;text)
   review_store: "data/review_queue.json" # geteilte Review-Queue (Pipeline <-> Bot)
   status: "data/status.json"             # Dashboard-Snapshot (Bot /report, /schwellen)
   notify_state: "data/notified.json"     # Zustand fuer proaktive Meldungen (Anti-Doppel)
   telegram_owner: "data/telegram_owner.json"  # erster Schreiber wird hier als Eigentuemer gemerkt
+
+costs:
+  ebay_fee_percent: 0.13                 # eBay-Verkaufsgebuehr (Schaetzung, ~13 %)
+  ebay_fixed_per_order: 0.35             # fixe Gebuehr je Verkauf (EUR)
 
 betrieb:
   pipeline_intervall_stunden: 6          # `serve`: Pipeline-Takt

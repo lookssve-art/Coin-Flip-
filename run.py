@@ -459,10 +459,13 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     belege_dir = belege_dir or config.get("pfade", {}).get("belege_inbox", "")
     csv_path = csv_path or config.get("pfade", {}).get("bank_csv", "")
     try:
+        from src.imports import lese_ausgaben_csv
         queue = _review_queue(config)
         receipts = []
         if belege_dir and os.path.isdir(belege_dir):
             receipts, queue = _ocr_belege(config, belege_dir)
+        # Echte Rechnungen aus der Ausgaben-CSV (Versand, Material, ...).
+        receipts += lese_ausgaben_csv(config.get("pfade", {}).get("ausgaben_csv", ""))
         txs = []
         if csv_path and os.path.exists(csv_path):
             txs = _bank_transaktionen(config, csv_path)
@@ -569,10 +572,21 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     if wareneinkauf > 0:
         euer.ausgaben_je_kategorie["wareneinkauf"] = (
             euer.ausgaben_je_kategorie.get("wareneinkauf", Decimal("0")) + wareneinkauf)
-        euer.ausgaben_gesamt += wareneinkauf
-        euer.gewinn = euer.einnahmen_gesamt - euer.ausgaben_gesamt
         euer.hinweise.append("Wareneinkauf enthaelt auch vor Gruendung gekaufte Ware "
                              "(Einlage) — Bewertung/Behandlung mit Steuerberater klaeren.")
+    # eBay-Verkaufsgebuehren (Schaetzung: % vom Umsatz + fixe Gebuehr je Verkauf).
+    costs = config.get("costs", {})
+    fee_pct = Decimal(str(costs.get("ebay_fee_percent", 0.13)))
+    fee_fix = Decimal(str(costs.get("ebay_fixed_per_order", 0.35)))
+    gebuehren = (euer.einnahmen_gesamt * fee_pct + len(sales) * fee_fix).quantize(Decimal("0.01"))
+    if gebuehren > 0:
+        euer.ausgaben_je_kategorie["gebuehren"] = (
+            euer.ausgaben_je_kategorie.get("gebuehren", Decimal("0")) + gebuehren)
+        euer.hinweise.append(f"eBay-Gebuehren geschaetzt ({fee_pct*100:.0f} % + {fee_fix}/Verkauf); "
+                             "centgenau via Finanz-API (digitale Signaturen) moeglich.")
+    # Gesamtsumme + Gewinn neu berechnen.
+    euer.ausgaben_gesamt = sum(euer.ausgaben_je_kategorie.values(), Decimal("0"))
+    euer.gewinn = euer.einnahmen_gesamt - euer.ausgaben_gesamt
     schreibe_euer_csv("data/euer_uebersicht.csv", euer)
     print(f"  EÜR: Einnahmen {euer.einnahmen_gesamt} - Ausgaben {euer.ausgaben_gesamt} "
           f"= Gewinn {euer.gewinn} EUR (data/euer_uebersicht.csv).")
