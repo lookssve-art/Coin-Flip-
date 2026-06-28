@@ -362,6 +362,16 @@ def _geschaeftsbeginn(config: dict):
     return parse_iso(config.get("unternehmen", {}).get("geschaeftsbeginn"))
 
 
+def _einkauf_ab(config: dict):
+    """Frueheres Datum fuer Einkaufspreis-Sammlung (§25a-Ware aus Einlage).
+
+    Faellt auf den Geschaeftsbeginn zurueck, wenn nicht gesetzt.
+    """
+    from src.util import parse_iso
+    u = config.get("unternehmen", {})
+    return parse_iso(u.get("einkauf_ab")) or _geschaeftsbeginn(config)
+
+
 def cmd_ebay_kaeufe(config: dict, export_path: str = "") -> int:
     """Liest die eBay-Kaufhistorie (Export) -> data/einkaufspreise.json (ab Beginn)."""
     import json
@@ -371,14 +381,14 @@ def cmd_ebay_kaeufe(config: dict, export_path: str = "") -> int:
     if rows is None:
         print(f"Keine eBay-Kaufdaten gefunden ({pfad}). Bestellverlauf als JSON exportieren.")
         return 2
-    beginn = _geschaeftsbeginn(config)
-    preise, ignoriert = normalisiere_kaeufe(rows, ab=beginn)
+    ab = _einkauf_ab(config)              # frueher als der Geschaeftsbeginn (§25a-Einlage)
+    preise, ignoriert = normalisiere_kaeufe(rows, ab=ab)
     ziel = config.get("pfade", {}).get("einkaufspreise", "data/einkaufspreise.json")
     os.makedirs(os.path.dirname(ziel) or ".", exist_ok=True)
     with open(ziel, "w", encoding="utf-8") as fh:
         json.dump({k: str(v) for k, v in preise.items()}, fh, ensure_ascii=False, indent=2)
     print(f"eBay-Kaeufe: {len(preise)} Einkaufspreise -> {ziel} "
-          f"(ab {beginn or 'Beginn'}; {len(ignoriert)} vor Gruendung ignoriert).")
+          f"(ab {ab or '—'}; {len(ignoriert)} davor ignoriert).")
     return 0
 
 
@@ -597,8 +607,10 @@ def cmd_check(config: dict) -> int:
 
     print("== Setup-Check ==\n")
     print("Stammdaten / Steuer:")
-    print(zeile(bool(config.get("unternehmen", {}).get("geschaeftsbeginn")),
-               f"Geschaeftsbeginn: {config.get('unternehmen', {}).get('geschaeftsbeginn', '—')}"))
+    u = config.get("unternehmen", {})
+    print(zeile(bool(u.get("geschaeftsbeginn")),
+               f"Geschaeftsbeginn: {u.get('geschaeftsbeginn', '—')} "
+               f"(Einkaufspreise ab {u.get('einkauf_ab', u.get('geschaeftsbeginn', '—'))})"))
     print(zeile(True, f"Kleinunternehmer (§19): {steuer.get('kleinunternehmer')}"))
     print(zeile(bool(steuer.get("ust_id")), "USt-IdNr", "beim BZSt beantragen (eBay-EU Pflicht)"))
 

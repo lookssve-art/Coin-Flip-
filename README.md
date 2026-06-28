@@ -156,7 +156,13 @@ Modul: [`src/integrations/ebay_purchases.py`](src/integrations/ebay_purchases.py
 
 `unternehmen.geschaeftsbeginn` (z. B. `2026-06-01`) ist der harte Stichtag: Belege,
 Banktransaktionen und Verkäufe **vor** der Gründung werden im `sync` ignoriert (saubere
-Trennung privat/geschäftlich). Modul: [`src/util/datum.py`](src/util/datum.py).
+Trennung privat/geschäftlich).
+
+**Ausnahme für Einkaufspreise:** `unternehmen.einkauf_ab` (z. B. `2026-03-01`) sammelt
+Einkaufspreise schon **vor** der Gründung — Ware, die du davor gekauft und erst nach dem
+01.06 verkauft hast, braucht für die **§ 25a-Marge** ihren Einkaufspreis (Einlage ins
+Betriebsvermögen). `ebay-kaeufe` nutzt dieses frühere Datum, der Rest bleibt beim
+Geschäftsbeginn. Modul: [`src/util/datum.py`](src/util/datum.py).
 
 ### Schwellen-Monitoring im `sync`
 
