@@ -225,12 +225,34 @@ def cmd_ebay_token(config: dict, code: str = "") -> int:
     except Exception as exc:  # noqa: BLE001
         print(f"Token-Austausch fehlgeschlagen: {exc}")
         return 1
-    print("Refresh-Token erhalten. Trage ihn in config.yaml unter "
-          "integrationen.ebay.refresh_token ein:\n")
-    print(tok.refresh_token)
-    print(f"\n(Access-Token gueltig ~{tok.expires_in}s; "
-          f"Refresh-Token ~{tok.refresh_token_expires_in}s)")
+    if not tok.refresh_token:
+        print("Kein Refresh-Token in der Antwort erhalten.")
+        return 1
+    gespeichert = _config_setze_ebay_refresh(tok.refresh_token)
+    if gespeichert:
+        print("\n✅ ERFOLG! Refresh-Token automatisch in config.yaml gespeichert.")
+        print("   Jetzt nur noch den Bot neu starten:  bash start-bot.sh")
+        print(f"   (gueltig ~{(tok.refresh_token_expires_in or 0)//86400} Tage)")
+    else:
+        print("Refresh-Token erhalten (config.yaml nicht gefunden — bitte manuell eintragen):\n")
+        print(tok.refresh_token)
     return 0
+
+
+def _config_setze_ebay_refresh(token: str) -> bool:
+    """Schreibt den Refresh-Token direkt in config.yaml (formaterhaltend)."""
+    import re
+    path = "config.yaml"
+    if not os.path.exists(path):
+        return False
+    with open(path, "r", encoding="utf-8") as fh:
+        txt = fh.read()
+    neu, n = re.subn(r"(?m)^(\s*refresh_token:\s*).*$",
+                     lambda m: m.group(1) + '"' + token + '"', txt)
+    if n:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(neu)
+    return n > 0
 
 
 def cmd_ebay_sync(config: dict, tage: str = "30") -> int:
