@@ -65,6 +65,28 @@ def http_json(
         raise HttpError(exc.code, body) from exc
 
 
+def http_text(
+    url: str,
+    *,
+    method: str = "POST",
+    body: bytes = b"",
+    headers: Optional[dict] = None,
+    timeout: float = 30.0,
+) -> str:
+    """Sendet einen Roh-Body (z. B. XML) und gibt die Antwort als Text zurueck.
+
+    Fuer die eBay-Trading-API (XML). Wirft ``HttpError`` bei Status >= 400.
+    """
+    hdrs = dict(headers or {})
+    req = urllib.request.Request(url, data=body, headers=hdrs, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        body_err = exc.read().decode("utf-8", errors="replace")
+        raise HttpError(exc.code, body_err) from exc
+
+
 def post_form(
     url: str,
     form: dict,

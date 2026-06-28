@@ -14,7 +14,8 @@ Verwendung:
     python run.py ebay-auth            # eBay-Consent-URL ausgeben (OAuth-Flow starten)
     python run.py ebay-token <code>    # Authorization-Code gegen Refresh-Token tauschen
     python run.py ebay-sync [tage]     # eBay-Transaktionen abrufen + Reconciliation-Import
-    python run.py ebay-kaeufe [export] # eBay-Kaufhistorie -> Einkaufspreise (§25a, ab Gruendung)
+    python run.py ebay-kaeufe [export] # eBay-Kaufhistorie (JSON) -> Einkaufspreise (§25a)
+    python run.py ebay-kaeufe-api      # Kaeufe der letzten ~90 Tage live via Trading-API holen
     python run.py lexware-ping         # Lexware-API-Key verifizieren (/profile)
     python run.py bank-import <csv>    # Lexware-Geschaeftskonto-CSV importieren
     python run.py lexware-push <dir>   # Belege aus <dir> als Draft-Vouchers nach Lexware
@@ -708,6 +709,52 @@ def cmd_gewinn(config: dict, bank_csv: str = "") -> int:
     return 0
 
 
+def cmd_ebay_kaeufe_api(config: dict, tage: str = "90") -> int:
+    """Holt die eBay-Kaeufe der letzten ~90 Tage live (Trading-API) und merged sie
+    in data/ebay_kaeufe.json. Aeltere Kaeufe (Altbestand) brauchen den Website-Export."""
+    import json
+    from src.integrations import EbayOAuth, EbayTradingClient
+    e = config.get("integrationen", {}).get("ebay", {})
+    # Access-Token besorgen (Refresh bevorzugt, sonst direkt hinterlegt).
+    access_token = None
+    if e.get("refresh_token") and e.get("app_id") and e.get("cert_id") and e.get("ru_name"):
+        try:
+            oauth = EbayOAuth(app_id=e["app_id"], cert_id=e["cert_id"], ru_name=e["ru_name"],
+                              environment=e.get("environment", "production"))
+            access_token = oauth.refresh(e["refresh_token"]).access_token
+        except Exception as exc:  # noqa: BLE001
+            print(f"Token-Refresh fehlgeschlagen: {exc}")
+    if access_token is None:
+        access_token = e.get("access_token")
+    if not access_token:
+        print("Kein eBay-Token. `ebay-auth`/`ebay-token` ausfuehren oder access_token setzen.")
+        return 2
+    try:
+        client = EbayTradingClient(access_token=access_token,
+                                   environment=e.get("environment", "production"),
+                                   site_id=("77" if e.get("marketplace_id", "EBAY_DE") == "EBAY_DE" else "0"))
+        neue = client.get_buyer_purchases(tage=int(tage))
+    except Exception as exc:  # noqa: BLE001
+        print(f"Trading-API GetOrders fehlgeschlagen: {exc}\n"
+              "Hinweis: ggf. Consent mit passendem Scope erneuern; aeltere Kaeufe nur via Website-Export.")
+        return 1
+    # Mit vorhandenem Export mergen (Website-Export + API ergaenzen sich).
+    pfad = config.get("pfade", {}).get("ebay_kaeufe_export", "data/ebay_kaeufe.json")
+    bestand = _lade_json(pfad) or []
+    bekannt = {(r.get("product_id"), r.get("date")) for r in bestand}
+    ergaenzt = [r for r in neue if (r.get("product_id"), r.get("date")) not in bekannt]
+    bestand.extend(ergaenzt)
+    os.makedirs(os.path.dirname(pfad) or ".", exist_ok=True)
+    with open(pfad, "w", encoding="utf-8") as fh:
+        json.dump(bestand, fh, ensure_ascii=False, indent=2)
+    print(f"Trading-API: {len(neue)} Kaeufe (letzte {min(int(tage), 90)} Tage), "
+          f"{len(ergaenzt)} neu -> {pfad}.")
+    print("Tipp: `python run.py ebay-kaeufe` erzeugt daraus die Einkaufspreise (ab einkauf_ab).")
+    if int(tage) > 90:
+        print("Hinweis: eBay liefert max. ~90 Tage; aeltere Kaeufe via Website-Bestellverlauf exportieren.")
+    return 0
+
+
 def _schritt(name: str, fn) -> bool:
     """Fuehrt einen Pipeline-Schritt robust aus (Fehler brechen den Lauf nicht ab)."""
     print(f"\n▶ {name}")
@@ -791,6 +838,7 @@ COMMANDS = {
     "ebay-token": cmd_ebay_token,
     "ebay-sync": cmd_ebay_sync,
     "ebay-kaeufe": cmd_ebay_kaeufe,
+    "ebay-kaeufe-api": cmd_ebay_kaeufe_api,
     "lexware-ping": cmd_lexware_ping,
     "bank-import": cmd_bank_import,
     "sync": cmd_sync,

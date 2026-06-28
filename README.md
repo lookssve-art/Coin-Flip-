@@ -152,6 +152,17 @@ Bei mehreren Käufen desselben Artikels gewinnt der **letzte ab Gründung**; Kä
 dem Geschäftsbeginn (private Anschaffung) werden ausgeschlossen.
 Modul: [`src/integrations/ebay_purchases.py`](src/integrations/ebay_purchases.py).
 
+**Live über die eBay-API** (laufende Käufe, ohne manuellen Export):
+```bash
+python run.py ebay-kaeufe-api    # Käufe der letzten ~90 Tage via Trading-API holen
+python run.py ebay-kaeufe         # daraus die Einkaufspreise erzeugen
+```
+Die **modernen Buy-APIs geben die eigene Kaufhistorie nicht her** — der dokumentierte Weg
+ist die Legacy-Trading-API (`GetOrders`, `OrderRole=Buyer`,
+[`src/integrations/ebay_trading.py`](src/integrations/ebay_trading.py)). **eBay liefert dort
+nur ~90 Tage**; ältere Käufe (Altbestand) brauchen den einmaligen Website-Bestellverlauf-Export.
+`ebay-kaeufe-api` **mergt** API-Daten und Export, sodass beide Quellen sich ergänzen.
+
 ### Geschäftsbeginn-Cutoff
 
 `unternehmen.geschaeftsbeginn` (z. B. `2026-06-01`) ist der harte Stichtag: Belege,
