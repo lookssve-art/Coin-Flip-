@@ -41,13 +41,28 @@ pfade:
   belegspeicher: "belege/"               # WORM / versioniert
   verfahrensdoku: "docs/verfahrensdokumentation.md"
 
-# --- Integrationen (Platzhalter; in spaeteren MVP-Stufen aktiviert) ---
+# --- Integrationen ---
+# WICHTIG: echte Keys NUR in config.yaml (gitignored) eintragen, nie hier.
 integrationen:
   lexware_office:
     base_url: "https://api.lexoffice.io/v1"
     api_key: ""                          # laeuft ab -> erneuern
     rate_limit_rps: 2                    # HTTP 429 -> Backoff/Queue
-    finalize_belege: false               # API legt default Drafts an
-  ebay: { app_id: "", cert_id: "", token: "" }
+    finalize_belege: false               # API legt default Drafts an (Festschreibung = manuell)
+  ebay:
+    konto_typ: "gewerblich"              # gewerblich | privat
+    app_id: ""                           # OAuth-Client (Production, gewerblich)
+    cert_id: ""
+    refresh_token: ""
   bank: { provider: "qonto", api_key: "" }   # qonto | finom | aggregator
   ocr: { provider: "textract", region: "eu-central-1" }
+  llm:
+    provider: "anthropic"                # Klassifikation/Orchestrierung
+    model: "claude-opus-4-8"
+    api_key: ""
+
+interface:
+  telegram:
+    token: ""                            # BotFather-Token
+    allowed_user_ids: []                 # nur diese User duerfen Freigaben erteilen
+    poll_timeout: 30

@@ -36,10 +36,31 @@ Ergänzt die vier Lücken, die in einer Betriebsprüfung über „anerkannt" vs.
 | **Auto-Verfahrensdokumentation** (GoBD) | [`src/verfahrensdoku/generator.py`](src/verfahrensdoku/generator.py) |
 | **Bank-/eBay-Import** (read-only, normalisierend, idempotent) | [`src/imports/`](src/imports/) |
 | **Reconciliation-Grundlogik** (Bank ↔ Belege, Teilzahlung/Refund/Differenz) | [`src/reconciliation/engine.py`](src/reconciliation/engine.py) |
+| **Lexware-Export** (Draft-Voucher, 2 req/s Rate-Limit-Backoff) | [`src/export/lexware.py`](src/export/lexware.py) |
+| **DATEV-/CSV-Journal** (Buchungs- + §25a-Differenzjournal, offline) | [`src/export/datev_csv.py`](src/export/datev_csv.py) |
+| **Telegram-Freigabe-/Review-Interface** (Human-in-the-Loop) | [`src/interface/telegram_bot.py`](src/interface/telegram_bot.py) |
 
-Noch offen (spätere MVP-Stufen): OCR-Pipeline (3), Lexware-Export (6).
-Priorisiert wurde — wie in der Spezifikation gefordert — das
-Compliance-Fundament **vor** den Komfortfeatures.
+Noch offen (spätere MVP-Stufe): OCR-Pipeline (3). Priorisiert wurde — wie in der
+Spezifikation gefordert — das Compliance-Fundament **vor** den Komfortfeatures.
+
+## Telegram-Bot (Freigabe-Interface)
+
+1. Trage Token und deine User-ID in `config.yaml` ein
+   (`interface.telegram.token`, `interface.telegram.allowed_user_ids`).
+2. Token prüfen: `python run.py telegram-check`
+3. Bot starten: `python run.py telegram`
+
+**User-ID herausfinden:** Bot starten (mit leerer Allowlist), dem Bot eine
+Nachricht schicken — er antwortet mit deiner User-ID, die du dann in
+`allowed_user_ids` einträgst und neu startest. Nur gelistete IDs dürfen Freigaben
+erteilen (der Bot steuert Buchhaltungs-Freigaben).
+
+**Befehle:** `/review` (offene Fälle), `/approve <ID>`, `/reject <ID>`, `/status`.
+Jede Freigabe wird im Audit-Log protokolliert.
+
+> Hinweis: Der Bot braucht ausgehenden Zugriff auf `api.telegram.org`. In manchen
+> abgesicherten CI-/Cloud-Umgebungen ist dieser Host per Egress-Policy gesperrt —
+> dort den Bot lokal bzw. auf dem Zielserver starten.
 
 ## Schnellstart
 

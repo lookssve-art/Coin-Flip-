@@ -210,10 +210,12 @@ Erzeugt jederzeit: Umsatzübersicht (Monat/Jahr), **USt-VA-Vorbereitung** (Zahll
 | 3 — Review-Queue + REVIEW_REQUIRED-Trigger | ✅ | `src/review/queue.py` |
 | 4 — Differenzbesteuerung § 25a (Einzel-/Gesamtdifferenz) | ✅ | `src/tax/differenzbesteuerung.py` |
 | 5 — E-Rechnungs-Empfang (XRechnung/ZUGFeRD) | ✅ (Basis) | `src/einvoice/parser.py` |
-| 6 — Lexware-Export | ⏳ offen | — |
+| 6 — Lexware-Export (Draft-Voucher, Rate-Limit-Backoff) | ✅ | `src/export/lexware.py` |
+| 6 — DATEV-/CSV-Journal (offline) | ✅ | `src/export/datev_csv.py` |
 | 7 — USt-VA-/EÜR-Vorbereitung | ✅ (USt-VA) | `src/tax/ustva.py` |
 | 7 — Schwellen-Monitoring 25k/100k/10k | ✅ | `src/tax/schwellen.py` |
 | 7 — Auto-Verfahrensdokumentation | ✅ | `src/verfahrensdoku/generator.py` |
+| 7 — Telegram-Freigabe-/Review-Interface | ✅ | `src/interface/telegram_bot.py` |
 
 Priorisiert wurde — wie in der Spezifikation gefordert — das **Compliance-Fundament**
 (Punkte 1, 5, 7-Doku) vor den Komfort-/Integrationsfeatures (2, 3-OCR, 6).

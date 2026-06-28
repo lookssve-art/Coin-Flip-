@@ -9,6 +9,8 @@ Verwendung:
     python run.py demo                 # End-to-End-Demo der Module
     python run.py verfahrensdoku       # Verfahrensdokumentation erzeugen
     python run.py audit-verify         # Hash-Kette des Audit-Logs pruefen
+    python run.py telegram-check       # Telegram-Bot-Token verifizieren (getMe)
+    python run.py telegram             # Telegram-Bot starten (Freigabe-Interface)
 """
 
 from __future__ import annotations
@@ -123,10 +125,52 @@ def cmd_audit_verify(config: dict) -> int:
     return 0 if ok else 1
 
 
+def cmd_telegram_check(config: dict) -> int:
+    from src.interface import TelegramBot
+    from src.review import ReviewQueue
+    tg = config.get("interface", {}).get("telegram", {})
+    if not tg.get("token"):
+        print("Kein Telegram-Token in config.yaml (interface.telegram.token).")
+        return 2
+    bot = TelegramBot(token=tg["token"], review_queue=ReviewQueue())
+    try:
+        me = bot.get_me().get("result", {})
+    except Exception as exc:  # noqa: BLE001
+        print(f"getMe fehlgeschlagen: {exc}")
+        return 1
+    print(f"Bot OK: @{me.get('username')} (id {me.get('id')}, name {me.get('first_name')})")
+    return 0
+
+
+def cmd_telegram(config: dict) -> int:
+    from src.audit import AuditLog
+    from src.interface import TelegramBot
+    from src.review import ReviewQueue
+    tg = config.get("interface", {}).get("telegram", {})
+    if not tg.get("token"):
+        print("Kein Telegram-Token in config.yaml (interface.telegram.token).")
+        return 2
+    allowed = set(tg.get("allowed_user_ids") or [])
+    if not allowed:
+        print("WARNUNG: allowed_user_ids leer — der Bot lehnt alle Befehle ab.\n"
+              "Schreibe dem Bot eine Nachricht; er antwortet mit deiner User-ID,\n"
+              "die du dann in config.yaml unter interface.telegram.allowed_user_ids eintraegst.")
+    bot = TelegramBot(
+        token=tg["token"],
+        review_queue=ReviewQueue(),
+        audit_log=AuditLog(config["pfade"]["audit_log"]),
+        allowed_user_ids=allowed,
+    )
+    bot.run(poll_timeout=int(tg.get("poll_timeout", 30)))
+    return 0
+
+
 COMMANDS = {
     "demo": cmd_demo,
     "verfahrensdoku": cmd_verfahrensdoku,
     "audit-verify": cmd_audit_verify,
+    "telegram-check": cmd_telegram_check,
+    "telegram": cmd_telegram,
 }
 
 
