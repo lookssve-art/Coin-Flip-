@@ -3,8 +3,9 @@
 from .ebay_oauth import EbayOAuth, TokenResponse, DEFAULT_SCOPES
 from .ebay_finance import EbayFinanceClient
 from .lexware_sync import LexwareSync, PushErgebnis
+from .ebay_purchases import normalisiere_kaeufe
 
 __all__ = [
     "EbayOAuth", "TokenResponse", "DEFAULT_SCOPES", "EbayFinanceClient",
-    "LexwareSync", "PushErgebnis",
+    "LexwareSync", "PushErgebnis", "normalisiere_kaeufe",
 ]

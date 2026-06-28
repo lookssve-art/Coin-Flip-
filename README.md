@@ -119,6 +119,46 @@ USt-VA-Entwurf. § 25a-Verkäufe **ohne** hinterlegten Einkaufspreis gehen in di
 (kein Raten); von eBay als Deemed Supplier abgeführte USt wird **nicht** doppelt angesetzt.
 Modul: [`src/tax/verkaeufe.py`](src/tax/verkaeufe.py).
 
+### eBay-Käufe → Einkaufspreise (§ 25a)
+
+Die Einkaufspreise ziehst du aus deiner eBay-Kaufhistorie (Bestellverlauf-Export, JSON):
+
+```bash
+python run.py ebay-kaeufe              # data/ebay_kaeufe.json → data/einkaufspreise.json
+```
+
+Bei mehreren Käufen desselben Artikels gewinnt der **letzte ab Gründung**; Käufe vor
+dem Geschäftsbeginn (private Anschaffung) werden ausgeschlossen.
+Modul: [`src/integrations/ebay_purchases.py`](src/integrations/ebay_purchases.py).
+
+### Geschäftsbeginn-Cutoff
+
+`unternehmen.geschaeftsbeginn` (z. B. `2026-06-01`) ist der harte Stichtag: Belege,
+Banktransaktionen und Verkäufe **vor** der Gründung werden im `sync` ignoriert (saubere
+Trennung privat/geschäftlich). Modul: [`src/util/datum.py`](src/util/datum.py).
+
+### Schwellen-Monitoring im `sync`
+
+`sync` überwacht automatisch die **§ 19-Grenze** (laufend 100.000 €) und die
+**OSS-Fernverkauf-Schwelle** (10.000 € EU-B2C netto, **§ 25a-Ware ausgenommen**) und legt
+bei Annäherung/Überschreitung einen Review-Fall an.
+
+## Telegram-„Duden" (Wissensbasis A–Z)
+
+Der Bot beantwortet Fragen zu allen relevanten Regeln per `/duden <frage>` —
+E-Rechnung, Aufbewahrungsfristen, § 19, GoBD, § 25a, OSS, EÜR, Gewerbesteuer, USt-VA,
+Einfuhrumsatzsteuer, Reverse-Charge, Vorsteuer, USt-Sätze, USt-IdNr, LUCID, DSGVO,
+Deemed Supplier. Jeder Eintrag nennt die **Fundstelle** (z. B. `§ 25a UStG`).
+
+- `/duden` (ohne Argument) listet alle Themen.
+- `/duden <frage>`: Schlagwort-/Volltextsuche. Ist ein Claude-Key konfiguriert
+  (`integrationen.llm.api_key`), formuliert Claude eine **gegroundete** Antwort
+  ausschließlich aus den Treffern (keine Halluzination); sonst werden die KB-Einträge
+  direkt ausgegeben.
+
+Wissensbasis: [`src/wissen/duden.py`](src/wissen/duden.py) — *allgemeine Information,
+keine Steuerberatung.*
+
 | Modul | Inhalt |
 |---|---|
 | [`src/imports/lexware_bank.py`](src/imports/lexware_bank.py) | Geschäftskonto-CSV (tolerant) → idempotente Bank-Transaktionen |

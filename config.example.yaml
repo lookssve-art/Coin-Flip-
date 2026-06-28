@@ -8,6 +8,7 @@ unternehmen:
   bundesland: "Bayern"
   rechtsform: "einzelunternehmen"       # einzelunternehmen | personengesellschaft
   gewinnermittlung: "euer"               # euer (Ist-Prinzip) | bilanz
+  geschaeftsbeginn: "2026-06-01"         # Daten vor diesem Datum werden ignoriert
 
 steuer:
   # Kleinunternehmer nach § 19 UStG. Bei false: Regelbesteuerung (Vorsteuerabzug,

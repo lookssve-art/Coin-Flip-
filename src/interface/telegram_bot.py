@@ -20,6 +20,7 @@ from typing import Optional
 from ..audit import AuditLog
 from ..review import ReviewQueue
 from ..util.http import http_json, HttpError
+from ..wissen import Duden
 
 _API = "https://api.telegram.org/bot{token}/{method}"
 
@@ -29,9 +30,18 @@ _HELP = (
     "/approve <ID>  — Fall freigeben (z. B. /approve REV-00001)\n"
     "/reject <ID>   — Fall ablehnen\n"
     "/status  — Kurzueberblick\n"
+    "/duden <frage> — Steuer-/Buchhaltungswissen nachschlagen (A-Z)\n"
     "/help    — diese Hilfe\n\n"
     "Hinweis: Der Assistent bereitet vor — die steuerliche Verantwortung bleibt "
-    "bei dir. Keine ELSTER-Abgabe ohne deine Freigabe."
+    "bei dir. Keine ELSTER-Abgabe ohne deine Freigabe. /duden ist allgemeine "
+    "Information, keine Steuerberatung."
+)
+
+_DUDEN_SYSTEM = (
+    "Du bist ein deutscher Steuer-/Buchhaltungs-Assistent (Rechtsstand 2025/2026). "
+    "Beantworte die Frage NUR auf Basis des bereitgestellten Kontexts. Erfinde keine "
+    "Paragraphen oder Zahlen. Wenn der Kontext nicht ausreicht, sage das und verweise "
+    "auf den Steuerberater. Antworte praezise auf Deutsch, nenne die Fundstelle."
 )
 
 
@@ -41,6 +51,9 @@ class TelegramBot:
     review_queue: ReviewQueue
     audit_log: Optional[AuditLog] = None
     allowed_user_ids: set[int] = field(default_factory=set)
+    duden: Optional[Duden] = None
+    llm_api_key: str = ""
+    llm_model: str = "claude-opus-4-8"
     _offset: int = 0
 
     # ------------------------------------------------------------------ #
@@ -86,7 +99,40 @@ class TelegramBot:
             return self._cmd_resolve(arg, freigeben=True, von=str(user_id))
         if cmd == "/reject":
             return self._cmd_resolve(arg, freigeben=False, von=str(user_id))
+        if cmd == "/duden":
+            return self._cmd_duden(arg)
         return "Unbekannter Befehl. /help fuer die Liste."
+
+    def _cmd_duden(self, frage: str) -> str:
+        if self.duden is None:
+            return "Wissensbasis nicht geladen."
+        if not frage:
+            return ("Themen (A-Z):\n• " + "\n• ".join(self.duden.liste())
+                    + "\n\nFrage stellen: /duden <frage>")
+        hits = self.duden.suche(frage)
+        if not hits:
+            return ("Dazu habe ich nichts in der Wissensbasis. Bei konkreten Faellen "
+                    "bitte den Steuerberater fragen.")
+        # Wenn Claude konfiguriert ist: gegroundete Antwort; sonst die KB-Eintraege.
+        if self.llm_api_key:
+            try:
+                return self._duden_claude(frage, hits)
+            except Exception:  # noqa: BLE001 - Fallback auf KB
+                pass
+        return "\n\n———\n\n".join(self.duden.formatiere(h) for h in hits[:2])
+
+    def _duden_claude(self, frage: str, hits) -> str:
+        import anthropic  # lazy
+        kontext = "\n\n".join(f"[{h.schlagwort} | {h.quelle}]\n{h.text}" for h in hits)
+        client = anthropic.Anthropic(api_key=self.llm_api_key)
+        resp = client.messages.create(
+            model=self.llm_model, max_tokens=1024, system=_DUDEN_SYSTEM,
+            output_config={"effort": "low"},
+            messages=[{"role": "user",
+                       "content": f"Kontext:\n{kontext}\n\nFrage: {frage}"}],
+        )
+        text = next((b.text for b in resp.content if b.type == "text"), "")
+        return text or "\n\n".join(self.duden.formatiere(h) for h in hits[:2])
 
     def _cmd_review(self) -> str:
         offen = self.review_queue.offen()

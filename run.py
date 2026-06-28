@@ -14,6 +14,7 @@ Verwendung:
     python run.py ebay-auth            # eBay-Consent-URL ausgeben (OAuth-Flow starten)
     python run.py ebay-token <code>    # Authorization-Code gegen Refresh-Token tauschen
     python run.py ebay-sync [tage]     # eBay-Transaktionen abrufen + Reconciliation-Import
+    python run.py ebay-kaeufe [export] # eBay-Kaufhistorie -> Einkaufspreise (§25a, ab Gruendung)
     python run.py lexware-ping         # Lexware-API-Key verifizieren (/profile)
     python run.py bank-import <csv>    # Lexware-Geschaeftskonto-CSV importieren
     python run.py lexware-push <dir>   # Belege aus <dir> als Draft-Vouchers nach Lexware
@@ -162,11 +163,16 @@ def cmd_telegram(config: dict) -> int:
         print("WARNUNG: allowed_user_ids leer — der Bot lehnt alle Befehle ab.\n"
               "Schreibe dem Bot eine Nachricht; er antwortet mit deiner User-ID,\n"
               "die du dann in config.yaml unter interface.telegram.allowed_user_ids eintraegst.")
+    from src.wissen import Duden
+    llm = config.get("integrationen", {}).get("llm", {})
     bot = TelegramBot(
         token=tg["token"],
         review_queue=ReviewQueue(),
         audit_log=AuditLog(config["pfade"]["audit_log"]),
         allowed_user_ids=allowed,
+        duden=Duden(),
+        llm_api_key=llm.get("api_key", ""),
+        llm_model=llm.get("model", "claude-opus-4-8"),
     )
     bot.run(poll_timeout=int(tg.get("poll_timeout", 30)))
     return 0
@@ -328,6 +334,31 @@ def _lade_json(pfad: str):
         return json.load(fh)
 
 
+def _geschaeftsbeginn(config: dict):
+    from src.util import parse_iso
+    return parse_iso(config.get("unternehmen", {}).get("geschaeftsbeginn"))
+
+
+def cmd_ebay_kaeufe(config: dict, export_path: str = "") -> int:
+    """Liest die eBay-Kaufhistorie (Export) -> data/einkaufspreise.json (ab Beginn)."""
+    import json
+    from src.integrations import normalisiere_kaeufe
+    pfad = export_path or config.get("pfade", {}).get("ebay_kaeufe_export", "data/ebay_kaeufe.json")
+    rows = _lade_json(pfad)
+    if rows is None:
+        print(f"Keine eBay-Kaufdaten gefunden ({pfad}). Bestellverlauf als JSON exportieren.")
+        return 2
+    beginn = _geschaeftsbeginn(config)
+    preise, ignoriert = normalisiere_kaeufe(rows, ab=beginn)
+    ziel = config.get("pfade", {}).get("einkaufspreise", "data/einkaufspreise.json")
+    os.makedirs(os.path.dirname(ziel) or ".", exist_ok=True)
+    with open(ziel, "w", encoding="utf-8") as fh:
+        json.dump({k: str(v) for k, v in preise.items()}, fh, ensure_ascii=False, indent=2)
+    print(f"eBay-Kaeufe: {len(preise)} Einkaufspreise -> {ziel} "
+          f"(ab {beginn or 'Beginn'}; {len(ignoriert)} vor Gruendung ignoriert).")
+    return 0
+
+
 def _ebay_verkaeufe(config: dict):
     """Laedt eBay-Verkaufszeilen aus dem konfigurierten Export (falls vorhanden)."""
     from src.imports import importiere_ebay_verkaeufe
@@ -344,6 +375,7 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     if not belege_dir or not csv_path:
         print("Verwendung: python run.py sync <belege_dir> <bank_csv>")
         return 2
+    from src.util import ab_geschaeftsbeginn
     try:
         receipts, queue = _ocr_belege(config, belege_dir)
         txs = _bank_transaktionen(config, csv_path)
@@ -351,6 +383,17 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     except Exception as exc:  # noqa: BLE001
         print(f"Sync fehlgeschlagen: {exc}")
         return 1
+
+    # Geschaeftsbeginn-Cutoff: alles vor der Gruendung gehoert in die private Sphaere.
+    beginn = _geschaeftsbeginn(config)
+    if beginn is not None:
+        n_r, n_t, n_s = len(receipts), len(txs), len(sales)
+        receipts = [r for r in receipts if ab_geschaeftsbeginn(r.datum, beginn)]
+        txs = [t for t in txs if ab_geschaeftsbeginn(t.datum, beginn)]
+        sales = [s for s in sales if ab_geschaeftsbeginn(s.datum, beginn)]
+        vor = (n_r - len(receipts)) + (n_t - len(txs)) + (n_s - len(sales))
+        if vor:
+            print(f"Geschaeftsbeginn {beginn}: {vor} Vorgaenge vor Gruendung ignoriert.")
 
     os.makedirs("data", exist_ok=True)
     ergebnisse = Reconciler().reconcile(txs, receipts)
@@ -374,6 +417,23 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
         print(f"  {len(journal.review_ids)} § 25a-Verkaeufe ohne Einkaufspreis -> Review.")
     if journal.deemed_supplier_ust > 0:
         print(f"  Deemed Supplier: {journal.deemed_supplier_ust} EUR USt bereits von eBay abgefuehrt.")
+
+    # Schwellen-Monitoring (§ 19 laufend + OSS 10k; § 25a-Ware ist ausgenommen).
+    from src.tax import SchwellenMonitor
+    sch = config.get("schwellen", {})
+    mon = SchwellenMonitor(
+        ku_vorjahr_grenze=Decimal(str(sch.get("kleinunternehmer_vorjahr_eur", 25000))),
+        ku_laufend_grenze=Decimal(str(sch.get("kleinunternehmer_laufend_eur", 100000))),
+        oss_grenze=Decimal(str(sch.get("oss_fernverkauf_eur", 10000))),
+        warnung_ab_prozent=Decimal(str(sch.get("warnung_ab_prozent", 80))),
+    )
+    ku_status = mon.kleinunternehmer_laufend(journal.umsatz_brutto)
+    oss_status = mon.oss_fernverkauf(journal.oss_netto_eu_b2c)
+    for st in (ku_status, oss_status):
+        flag = "UEBERSCHRITTEN" if st.ueberschritten else ("WARNUNG" if st.warnung else "ok")
+        print(f"  Schwelle {st.name}: {st.aktuell}/{st.grenze} EUR = {st.prozent}% [{flag}]")
+        if st.warnung or st.ueberschritten:
+            queue.add(f"Annaeherung/Ueberschreitung Schwelle {st.name}", bezug="schwellen")
 
     print(f"  Review-Queue: {len(queue.offen())} offen.")
     ku = bool(config.get("steuer", {}).get("kleinunternehmer", True))
@@ -422,6 +482,7 @@ COMMANDS = {
     "ebay-auth": cmd_ebay_auth,
     "ebay-token": cmd_ebay_token,
     "ebay-sync": cmd_ebay_sync,
+    "ebay-kaeufe": cmd_ebay_kaeufe,
     "lexware-ping": cmd_lexware_ping,
     "bank-import": cmd_bank_import,
     "sync": cmd_sync,

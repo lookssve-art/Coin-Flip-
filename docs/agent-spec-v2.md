@@ -221,6 +221,10 @@ Erzeugt jederzeit: Umsatzübersicht (Monat/Jahr), **USt-VA-Vorbereitung** (Zahll
 | 7 — Schwellen-Monitoring 25k/100k/10k | ✅ | `src/tax/schwellen.py` |
 | 7 — Auto-Verfahrensdokumentation | ✅ | `src/verfahrensdoku/generator.py` |
 | 7 — Telegram-Freigabe-/Review-Interface | ✅ | `src/interface/telegram_bot.py` |
+| 7 — Schwellen-Monitoring im `sync` (§19 + OSS 10k) | ✅ | `run.py` (cmd_sync), `src/tax/schwellen.py` |
+| 7 — Telegram-„Duden" (Wissensbasis A–Z, optional Claude) | ✅ | `src/wissen/duden.py` |
+| Geschäftsbeginn-Cutoff (Daten ab Gründung) | ✅ | `src/util/datum.py` |
+| eBay-Käufe → Einkaufspreise (§ 25a) | ✅ | `src/integrations/ebay_purchases.py` |
 
 Priorisiert wurde — wie in der Spezifikation gefordert — das **Compliance-Fundament**
 (Punkte 1, 5, 7-Doku) vor den Komfort-/Integrationsfeatures (2, 3-OCR, 6).

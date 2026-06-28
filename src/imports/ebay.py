@@ -53,6 +53,7 @@ def importiere_ebay_verkaeufe(rows: list[dict]) -> list[PlatformSale]:
             refund=_dec(row.get("refund")),
             product_id=row.get("product_id"),
             customer_country=str(row.get("buyer_country") or row.get("country") or "DE").upper(),
+            customer_is_business=bool(row.get("is_business", False)),
             tax_scheme=scheme,
             ebay_collected_vat=_dec(row.get("collected_vat") or row.get("ebay_collected_vat")),
         ))
