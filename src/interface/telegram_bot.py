@@ -58,7 +58,31 @@ class TelegramBot:
     llm_api_key: str = ""
     llm_model: str = "claude-opus-4-8"
     status_path: str = ""
+    owner_store: str = ""        # Datei, in der der erste Nutzer als Eigentuemer gespeichert wird
     _offset: int = 0
+
+    def __post_init__(self):
+        if self.owner_store:
+            self._load_owner()
+
+    def _load_owner(self) -> None:
+        import json
+        import os
+        if not os.path.exists(self.owner_store):
+            return
+        try:
+            with open(self.owner_store, "r", encoding="utf-8") as fh:
+                ids = json.load(fh)
+            self.allowed_user_ids |= {int(i) for i in ids}
+        except (OSError, ValueError):
+            pass
+
+    def _save_owner(self) -> None:
+        import json
+        import os
+        os.makedirs(os.path.dirname(os.path.abspath(self.owner_store)), exist_ok=True)
+        with open(self.owner_store, "w", encoding="utf-8") as fh:
+            json.dump(sorted(self.allowed_user_ids), fh)
 
     # ------------------------------------------------------------------ #
     # Netzwerk
@@ -84,6 +108,15 @@ class TelegramBot:
     def handle_command(self, text: str, user_id: int) -> str:
         """Verarbeitet eine Textnachricht und gibt die Antwort zurueck (kein Netzwerk)."""
         if not self.ist_autorisiert(user_id):
+            # Erst-Einrichtung: ist noch niemand freigeschaltet, wird der erste
+            # Nutzer automatisch als Eigentuemer registriert (und persistiert).
+            if self.owner_store and not self.allowed_user_ids:
+                self.allowed_user_ids.add(user_id)
+                self._save_owner()
+                if self.audit_log is not None:
+                    self.audit_log.append("telegram.owner_registriert", {"user_id": user_id})
+                return ("✅ Du bist jetzt als Eigentuemer freigeschaltet. Willkommen!\n\n"
+                        "Schreib /uebersicht fuer den Einstieg.")
             return ("Nicht autorisiert. Diese Chat-ID ist nicht freigeschaltet. "
                     f"(Deine User-ID: {user_id} — in config.yaml unter "
                     "interface.telegram.allowed_user_ids eintragen.)")

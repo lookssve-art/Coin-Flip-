@@ -165,10 +165,11 @@ def cmd_telegram(config: dict) -> int:
         print("Kein Telegram-Token in config.yaml (interface.telegram.token).")
         return 2
     allowed = set(tg.get("allowed_user_ids") or [])
-    if not allowed:
-        print("WARNUNG: allowed_user_ids leer — der Bot lehnt alle Befehle ab.\n"
-              "Schreibe dem Bot eine Nachricht; er antwortet mit deiner User-ID,\n"
-              "die du dann in config.yaml unter interface.telegram.allowed_user_ids eintraegst.")
+    owner_store = config.get("pfade", {}).get("telegram_owner", "data/telegram_owner.json")
+    if not allowed and not os.path.exists(owner_store):
+        print("Erst-Einrichtung: noch niemand freigeschaltet.\n"
+              "Schreibe dem Bot jetzt eine Nachricht — der ERSTE Schreiber wird automatisch\n"
+              "als Eigentuemer freigeschaltet (danach sind nur noch DU berechtigt).")
     from src.wissen import Duden
     llm = config.get("integrationen", {}).get("llm", {})
     bot = TelegramBot(
@@ -180,6 +181,7 @@ def cmd_telegram(config: dict) -> int:
         llm_api_key=llm.get("api_key", ""),
         llm_model=llm.get("model", "claude-opus-4-8"),
         status_path=config.get("pfade", {}).get("status", ""),
+        owner_store=owner_store,
     )
     bot.run(poll_timeout=int(tg.get("poll_timeout", 30)))
     return 0

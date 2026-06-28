@@ -90,6 +90,24 @@ class TestBotDashboard(unittest.TestCase):
             self.assertIn("Gewinn 742.50 EUR", antwort)
             self.assertIn("Kleinunternehmer", antwort)
 
+    def test_selbst_freischaltung_erster_nutzer(self):
+        with tempfile.TemporaryDirectory() as d:
+            owner = os.path.join(d, "owner.json")
+            bot = TelegramBot(token="x", review_queue=ReviewQueue(),
+                              duden=Duden(), owner_store=owner)   # leere Allowlist
+            # Erster Nutzer wird automatisch freigeschaltet.
+            antwort = bot.handle_command("hallo", user_id=555)
+            self.assertIn("freigeschaltet", antwort)
+            self.assertIn(555, bot.allowed_user_ids)
+            self.assertTrue(os.path.exists(owner))
+            # Zweiter, unbekannter Nutzer NICHT mehr.
+            antwort2 = bot.handle_command("/uebersicht", user_id=999)
+            self.assertIn("Nicht autorisiert", antwort2)
+            # Neue Bot-Instanz laedt den Eigentuemer aus der Datei.
+            bot2 = TelegramBot(token="x", review_queue=ReviewQueue(),
+                               duden=Duden(), owner_store=owner)
+            self.assertIn(555, bot2.allowed_user_ids)
+
     def test_schwellen_command(self):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "status.json")
