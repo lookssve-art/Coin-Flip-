@@ -182,6 +182,8 @@ def cmd_telegram(config: dict) -> int:
         llm_model=llm.get("model", "claude-opus-4-8"),
         status_path=config.get("pfade", {}).get("status", ""),
         owner_store=owner_store,
+        pipeline_callback=lambda: (cmd_run_all(config),
+                                   "Zahlen aktualisiert.")[1],
     )
     bot.run(poll_timeout=int(tg.get("poll_timeout", 30)))
     return 0

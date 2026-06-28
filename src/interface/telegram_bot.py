@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Callable, Optional
 
 from ..audit import AuditLog
 from ..review import ReviewQueue
@@ -30,6 +30,7 @@ _HELP = (
     "/approve <ID>  — Fall freigeben (z. B. /approve REV-00001)\n"
     "/reject <ID>   — Fall ablehnen\n"
     "/uebersicht — was ich mache + aktueller Stand (Einstieg)\n"
+    "/sync    — jetzt aktuelle Zahlen ziehen (eBay) + neu rechnen\n"
     "/status  — Kurzueberblick (offene Faelle)\n"
     "/report  — Dashboard: Umsaetze, USt, Schwellen aus dem letzten Sync\n"
     "/schwellen — § 19- und OSS-Schwellen-Status\n"
@@ -59,6 +60,7 @@ class TelegramBot:
     llm_model: str = "claude-opus-4-8"
     status_path: str = ""
     owner_store: str = ""        # Datei, in der der erste Nutzer als Eigentuemer gespeichert wird
+    pipeline_callback: Optional[Callable[[], str]] = None  # /sync: zieht Daten + rechnet
     _offset: int = 0
 
     def __post_init__(self):
@@ -153,7 +155,31 @@ class TelegramBot:
             return self._cmd_resolve(arg, freigeben=False, von=str(user_id))
         if cmd == "/duden":
             return self._cmd_duden(arg)
+        if cmd in ("/sync", "/aktualisieren"):
+            return self._cmd_sync(user_id)
         return "Unbekannter Befehl. /help fuer die Liste."
+
+    def _cmd_sync(self, chat_id: int) -> str:
+        """Loest den Datenabruf + die Neuberechnung aus (laeuft im Hintergrund)."""
+        if self.pipeline_callback is None:
+            return ("Automatischer Abruf ist hier nicht aktiv. Starte den Agenten mit "
+                    "`python run.py telegram` (dort ist die Pipeline angebunden).")
+        import threading
+
+        def job():
+            try:
+                zusammenfassung = self.pipeline_callback()
+            except Exception as exc:  # noqa: BLE001
+                zusammenfassung = f"Aktualisierung fehlgeschlagen: {exc}"
+            try:
+                self.send_message(chat_id, "✅ Fertig.\n\n" + zusammenfassung
+                                  + "\n\nSchick /report fuer die Uebersicht.")
+            except Exception:  # noqa: BLE001
+                pass
+
+        threading.Thread(target=job, daemon=True).start()
+        return ("🔄 Ich ziehe die aktuellen Zahlen (eBay etc.) und rechne neu — das kann "
+                "1–2 Minuten dauern. Ich melde mich, wenn ich fertig bin.")
 
     def _cmd_uebersicht(self) -> str:
         offen = len(self.review_queue.offen())

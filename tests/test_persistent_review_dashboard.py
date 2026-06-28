@@ -108,6 +108,24 @@ class TestBotDashboard(unittest.TestCase):
                                duden=Duden(), owner_store=owner)
             self.assertIn(555, bot2.allowed_user_ids)
 
+    def test_sync_ohne_callback(self):
+        antwort = self._bot().handle_command("/sync", user_id=1)
+        self.assertIn("nicht aktiv", antwort)
+
+    def test_sync_mit_callback_quittiert_und_laeuft(self):
+        import threading
+        fertig = threading.Event()
+        calls = []
+        bot = TelegramBot(token="x", review_queue=ReviewQueue(), allowed_user_ids={1},
+                          duden=Duden(),
+                          pipeline_callback=lambda: (calls.append(1), "ok")[1])
+        # send_message wird vom Hintergrund-Thread aufgerufen -> abfangen.
+        bot._call = lambda method, **kw: fertig.set() or {"ok": True}
+        antwort = bot.handle_command("/sync", user_id=1)
+        self.assertIn("ziehe die aktuellen Zahlen", antwort)
+        self.assertTrue(fertig.wait(timeout=2))
+        self.assertEqual(calls, [1])
+
     def test_schwellen_command(self):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "status.json")
