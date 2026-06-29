@@ -21,6 +21,9 @@ Verwendung:
     python run.py rechnung-setup ...   # Absenderdaten in config.yaml schreiben (Firmenangaben)
     python run.py rechnungen           # Rechnungen aus eBay-Verkaeufen erzeugen (Billbee-Ersatz)
     python run.py rechnungen-push      # Erzeugte Rechnungen nach Lexware Office uebertragen
+    python run.py bwa                  # BWA/Monatsabschluss (Rohertrag, Kosten, Kennzahlen)
+    python run.py pruefung             # Plausibilitaet (IBAN/USt-IdNr/Dubletten)
+    python run.py kann                 # Funktionsumfang anzeigen (Master-Prompt-Abgleich)
     python run.py lexware-ping         # Lexware-API-Key verifizieren (/profile)
     python run.py bank-import <csv>    # Lexware-Geschaeftskonto-CSV importieren
     python run.py lexware-push <dir>   # Belege aus <dir> als Draft-Vouchers nach Lexware
@@ -161,6 +164,21 @@ def cmd_telegram_check(config: dict) -> int:
     return 0
 
 
+def _bwa_text(config: dict) -> str:
+    """BWA als Text fuer den Bot (nutzt den letzten EÜR-Snapshot)."""
+    from src.abschluss import erstelle_bwa, render_bwa_text
+    from src.util import ab_geschaeftsbeginn
+    euer = _euer_snapshot(config)
+    if euer is None:
+        return "Noch kein Stand — erst /sync ausfuehren."
+    beginn = _geschaeftsbeginn(config)
+    sales = [s for s in _ebay_verkaeufe(config)
+             if (not beginn or ab_geschaeftsbeginn(s.datum, beginn))]
+    rahmen = config.get("kontierung", {}).get("rahmen", "skr03")
+    return render_bwa_text(erstelle_bwa(sales, euer, rahmen=rahmen,
+                                        config=config.get("kontierung")))
+
+
 def _rechnungen_zusammenfassung(config: dict) -> str:
     """Erzeugt Rechnungen (+ optional Lexware-Push) und liefert eine kurze Meldung."""
     cmd_rechnungen(config)
@@ -207,6 +225,7 @@ def cmd_telegram(config: dict) -> int:
         pipeline_callback=lambda: (cmd_run_all(config),
                                    "Zahlen aktualisiert.")[1],
         rechnungen_callback=lambda: _rechnungen_zusammenfassung(config),
+        bwa_callback=lambda: _bwa_text(config),
     )
     bot.run(poll_timeout=int(tg.get("poll_timeout", 30)))
     return 0
@@ -472,11 +491,20 @@ def cmd_ebay_finances(config: dict, tage: str = "") -> int:
     os.makedirs(os.path.dirname(pfad) or ".", exist_ok=True)
     with open(pfad, "w", encoding="utf-8") as fh:
         json.dump(ergebnis, fh, ensure_ascii=False, indent=2)
+    # Auszahlungen (PAYOUT) separat ablegen -> Konto-Abgleich (PayJoe-Rolle).
+    payouts = [{"id": t.get("payoutId") or t.get("transactionId") or "",
+                "date": (t.get("transactionDate") or "")[:10],
+                "amount": (t.get("amount") or {}).get("value", "0")}
+               for t in txs if (t.get("transactionType") or "").upper() == "PAYOUT"]
+    payout_pfad = config.get("pfade", {}).get("ebay_payouts", "data/ebay_payouts.json")
+    with open(payout_pfad, "w", encoding="utf-8") as fh:
+        json.dump(payouts, fh, ensure_ascii=False, indent=2)
     print(f"Finances-API: {len(txs)} Transaktionen, {s['n_sales']} Verkaeufe "
           f"({start} – {ende}).")
     print(f"  Echte eBay-Gebuehren: {s['fees_total']} EUR -> {pfad}")
+    print(f"  eBay-Auszahlungen: {len(payouts)} -> {payout_pfad} (fuer Konto-Abgleich)")
     print(f"  (Brutto {s['sales_gross']} EUR, Refunds {s['refunds_total']} EUR)")
-    print("  `python run.py sync` nutzt diese echten Gebuehren jetzt automatisch.")
+    print("  `python run.py sync` nutzt echte Gebuehren + Auszahlungen jetzt automatisch.")
     return 0
 
 
@@ -821,6 +849,101 @@ def cmd_rechnungen_push(config: dict) -> int:
     return 0 if fehler == 0 else 1
 
 
+def _euer_snapshot(config: dict):
+    """Laedt den EÜR-Snapshot (von sync geschrieben) als leichtes Objekt."""
+    from decimal import Decimal as D
+    pfad = config.get("pfade", {}).get("euer_snapshot", "data/euer.json")
+    daten = _lade_json(pfad)
+    if not daten:
+        return None
+
+    class _E:
+        einnahmen_gesamt = D(str(daten.get("einnahmen_gesamt", "0")))
+        ausgaben_gesamt = D(str(daten.get("ausgaben_gesamt", "0")))
+        gewinn = D(str(daten.get("gewinn", "0")))
+        ausgaben_je_kategorie = {k: D(str(v))
+                                 for k, v in (daten.get("ausgaben_je_kategorie") or {}).items()}
+    return _E()
+
+
+def cmd_bwa(config: dict) -> int:
+    """BWA / Monatsabschluss aus dem letzten Sync (Umsatz, Rohertrag, Kosten,
+    Gewinn, Kennzahlen, Monatsverlauf)."""
+    from src.abschluss import erstelle_bwa, render_bwa_text, schreibe_bwa_csv
+    from src.util import ab_geschaeftsbeginn
+    euer = _euer_snapshot(config)
+    if euer is None:
+        print("Noch kein EÜR-Stand. Zuerst `python run.py sync` ausfuehren.")
+        return 2
+    beginn = _geschaeftsbeginn(config)
+    sales = [s for s in _ebay_verkaeufe(config)
+             if (not beginn or ab_geschaeftsbeginn(s.datum, beginn))]
+    rahmen = config.get("kontierung", {}).get("rahmen", "skr03")
+    bwa = erstelle_bwa(sales, euer, rahmen=rahmen, config=config.get("kontierung"))
+    pfad = config.get("pfade", {}).get("bwa_csv", "data/bwa.csv")
+    schreibe_bwa_csv(pfad, bwa)
+    print(render_bwa_text(bwa))
+    print(f"\n(CSV: {pfad})")
+    return 0
+
+
+def cmd_pruefung(config: dict) -> int:
+    """Plausibilitaets- + Dublettenpruefung: Absender-IBAN/USt-IdNr, Rechnungs-
+    Mathematik der erzeugten Rechnungen, Dubletten im Register."""
+    from src.pruefung import (pruefe_iban, pruefe_ust_id, ist_dublette,
+                              dubletten_schluessel, Schwere)
+    befunde = []
+    a = _absender(config)
+    befunde.append(("Absender-IBAN", pruefe_iban(a.iban)))
+    if a.ust_id:
+        befunde.append(("Absender-USt-IdNr", pruefe_ust_id(a.ust_id)))
+    # Dubletten im Rechnungsregister.
+    reg = _rechnungs_register(config).alle()
+    gesehen, dubletten = set(), 0
+    for bid, e in reg.items():
+        beleg = {"nummer": e.get("nummer"), "betrag": e.get("betrag"),
+                 "datum": e.get("datum"), "kunde": bid}
+        if ist_dublette(beleg, gesehen):
+            dubletten += 1
+        gesehen.add(dubletten_schluessel(beleg))
+    print("🔎 Plausibilitaetspruefung")
+    for label, b in befunde:
+        zeichen = {"ok": "✓", "hinweis": "•", "fehler": "✗"}[b.schwere.value]
+        print(f"  {zeichen} {label}: {b.nachricht}")
+    print(f"  • Rechnungsregister: {len(reg)} Eintraege, {dubletten} Dubletten.")
+    fehler = sum(1 for _, b in befunde if b.schwere == Schwere.FEHLER)
+    print(f"\n{'⚠ ' + str(fehler) + ' Fehler' if fehler else '✓ keine formalen Fehler'}.")
+    return 0
+
+
+_FUNKTIONSUEBERSICHT = """SERO Agent — Funktionsumfang (gegen Master-Prompt):
+  ✅ eBay-Verkaeufe/-Kaeufe ziehen (Trading-API)        -> ebay-verkaeufe-api / ebay-kaeufe-api
+  ✅ Echte eBay-Gebuehren + Auszahlungen (signiert)     -> ebay-finances
+  ✅ Rechnungen erstellen (rechtskonform, fortl. Nr.)   -> rechnungen
+  ✅ Rechnungen nach Lexware (Entwurf/festschreiben)    -> rechnungen-push
+  ✅ Differenzbesteuerung §25a / Kleinunternehmer §19   -> sync
+  ✅ USt-VA-Kennzahlen (Kz 81/86/66/83) + EÜR           -> sync
+  ✅ Automatische Kontierung SKR03/SKR04                -> (in sync/bwa)
+  ✅ Plausibilitaet: IBAN/USt-IdNr/Mathematik/Dubletten -> pruefung
+  ✅ BWA/Monatsabschluss (Rohertrag, Kennzahlen)        -> bwa
+  ✅ Reconciliation Auszahlung<->Bank, Belege<->Bank    -> sync (+ Konto-CSV)
+  ✅ Schwellen-Monitoring (§19, OSS 10k)                -> sync
+  ✅ OCR-Beleg-Pipeline (Kategorie/Vorsteuer)           -> sync (+ Beleg-Inbox)
+  ✅ DATEV-/CSV-Export, Audit-Log (revisionssicher)     -> export/, audit/
+  ✅ Telegram-Steuerung + Freigaben + Duden             -> telegram
+  ✅ Dauerbetrieb (Monitoring im Takt)                  -> serve
+  🟡 PayPal-Anbindung   -> Client/Parser folgt (braucht PayPal-API-Keys)
+  🟡 E-Mail-/Cloud-Ingest -> Gmail/Drive-Anbindung optional (Laufzeit-abhaengig)
+  🟡 OCR-Backend        -> Pipeline da; echtes OCR braucht Provider (Textract o.ae.)
+"""
+
+
+def cmd_kann(config: dict) -> int:
+    """Zeigt den Funktionsumfang (was automatisiert ist, was noch ansteht)."""
+    print(_FUNKTIONSUEBERSICHT)
+    return 0
+
+
 def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     from decimal import Decimal
     from src.reconciliation import Reconciler, MatchStatus
@@ -998,6 +1121,18 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     status_pfad = config.get("pfade", {}).get("status", "data/status.json")
     with open(status_pfad, "w", encoding="utf-8") as fh:
         json.dump(snapshot, fh, ensure_ascii=False, indent=2)
+
+    # Reicher EÜR-Snapshot (fuer BWA/Monatsabschluss).
+    euer_snapshot = {
+        "zeitraum": "laufend",
+        "einnahmen_gesamt": str(euer.einnahmen_gesamt),
+        "ausgaben_gesamt": str(euer.ausgaben_gesamt),
+        "gewinn": str(euer.gewinn),
+        "ausgaben_je_kategorie": {k: str(v) for k, v in euer.ausgaben_je_kategorie.items()},
+    }
+    euer_pfad = config.get("pfade", {}).get("euer_snapshot", "data/euer.json")
+    with open(euer_pfad, "w", encoding="utf-8") as fh:
+        json.dump(euer_snapshot, fh, ensure_ascii=False, indent=2)
 
     _benachrichtige(config, queue, snapshot)
     return 0
@@ -1373,6 +1508,9 @@ COMMANDS = {
     "rechnung-setup": cmd_rechnung_setup,
     "rechnungen": cmd_rechnungen,
     "rechnungen-push": cmd_rechnungen_push,
+    "bwa": cmd_bwa,
+    "pruefung": cmd_pruefung,
+    "kann": cmd_kann,
     "lexware-ping": cmd_lexware_ping,
     "bank-import": cmd_bank_import,
     "sync": cmd_sync,

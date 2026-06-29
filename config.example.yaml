@@ -46,6 +46,8 @@ pfade:
   ebay_payouts: "data/ebay_payouts.json" # eBay-Auszahlungen (von ebay-sync befuellt)
   ebay_kaeufe_export: "data/ebay_kaeufe.json"  # eBay-Kaufhistorie (Bestellverlauf-Export)
   ebay_fees_export: "data/ebay_fees.json"      # echte eBay-Gebuehren (von ebay-finances)
+  euer_snapshot: "data/euer.json"              # EÜR-Stand fuer BWA (von sync)
+  bwa_csv: "data/bwa.csv"                      # BWA/Monatsabschluss-Export
   ebay_signing_key: "data/ebay_signing_key.json"  # Ed25519-Signaturschluessel (gitignored!)
   einkaufspreise: "data/einkaufspreise.json"  # {product_id: preis} fuer § 25a
   belege_inbox: "inbox/belege/"          # autonomer Betrieb: Belege hier ablegen
@@ -59,6 +61,13 @@ pfade:
 costs:
   ebay_fee_percent: 0.13                 # eBay-Verkaufsgebuehr (Schaetzung, ~13 %)
   ebay_fixed_per_order: 0.35             # fixe Gebuehr je Verkauf (EUR)
+
+# --- Kontierung (automatische Konten, Master-Prompt Punkt 5) ---
+# Standardkontenrahmen + optionale Konto-Overrides (mit Steuerberater bestaetigen).
+kontierung:
+  rahmen: "skr03"                        # skr03 | skr04
+  # skr03: { wareneinkauf: "3300" }      # einzelne Konten ueberschreiben (optional)
+  # skr04: { gebuehren: "6855" }
 
 # --- Rechnungsstellung (Billbee-Ersatz) ---
 # Erzeugt aus eBay-Verkaeufen rechtskonforme Rechnungen, archiviert sie (GoBD,
