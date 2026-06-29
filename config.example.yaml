@@ -60,6 +60,36 @@ costs:
   ebay_fee_percent: 0.13                 # eBay-Verkaufsgebuehr (Schaetzung, ~13 %)
   ebay_fixed_per_order: 0.35             # fixe Gebuehr je Verkauf (EUR)
 
+# --- Rechnungsstellung (Billbee-Ersatz) ---
+# Erzeugt aus eBay-Verkaeufen rechtskonforme Rechnungen, archiviert sie (GoBD,
+# unter belege/ = gitignored, da Kundendaten) und uebertraegt sie nach Lexware.
+rechnung:
+  aktiv: true
+  modus: "alle"                          # alle | intern | manuell
+  nummer_prefix: ""                      # z. B. "RE-"  -> RE-2026-0001
+  nummer_mit_jahr: true                  # 2026-0001 (false: durchgehend ab nummer_start)
+  nummer_start: 1
+  kleinunternehmer_hinweis: "Gemäß § 19 UStG wird keine Umsatzsteuer berechnet (Kleinunternehmer)."
+  verzeichnis: "belege/rechnungen/"      # Ablage HTML/Text/JSON/PDF (gitignored)
+  register: "data/rechnungen_register.json"     # idempotent: 1 Rechnung je Bestellung
+  nummernkreis: "data/rechnungsnummern.json"    # fortlaufender Zaehler (§14 UStG)
+  lexware:
+    push: false                          # true: run-all pusht automatisch; sonst `rechnungen-push`
+    finalize: false                      # true = sofort festschreiben (GoBD-fest, nicht aenderbar)
+    pdf_speichern: true                  # gerenderte Lexware-PDF lokal sichern
+  absender:                              # PFLICHT fuer Rechtsgueltigkeit (§14 UStG)
+    name: ""                             # Firmen-/Inhabername
+    strasse: ""
+    plz: ""
+    ort: ""
+    land: "DE"
+    steuernummer: ""                     # Steuernummer ODER ust_id Pflicht
+    ust_id: ""
+    email: ""
+    telefon: ""
+    iban: ""
+    bic: ""
+
 betrieb:
   pipeline_intervall_stunden: 6          # `serve`: Pipeline-Takt
   ebay_sync_tage: 30                     # Zeitfenster fuer ebay-sync

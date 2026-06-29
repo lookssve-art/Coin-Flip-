@@ -128,6 +128,10 @@ class PlatformSale:
     refund: Decimal = Decimal("0")
     product_id: Optional[str] = None
     customer_country: str = "DE"
+    customer_name: str = ""                      # Rechnungsadresse (soweit von eBay geliefert)
+    customer_street: str = ""
+    customer_zip: str = ""
+    customer_city: str = ""
     customer_is_business: bool = False          # B2B (Reverse-Charge) vs. B2C (OSS)
     tax_scheme: TaxScheme = TaxScheme.REGEL
     ebay_collected_vat: Decimal = Decimal("0")  # Deemed-Supplier: von eBay abgefuehrt

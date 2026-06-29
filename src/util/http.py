@@ -87,6 +87,23 @@ def http_text(
         raise HttpError(exc.code, body_err) from exc
 
 
+def http_bytes(
+    url: str,
+    *,
+    headers: Optional[dict] = None,
+    timeout: float = 30.0,
+) -> bytes:
+    """Laedt eine Binaerdatei (z. B. gerenderte Rechnungs-PDF) und gibt Bytes zurueck."""
+    hdrs = dict(headers or {})
+    req = urllib.request.Request(url, headers=hdrs, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:
+            return resp.read()
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise HttpError(exc.code, body) from exc
+
+
 def post_form(
     url: str,
     form: dict,

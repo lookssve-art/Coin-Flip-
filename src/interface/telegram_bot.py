@@ -31,6 +31,7 @@ _HELP = (
     "/reject <ID>   — Fall ablehnen\n"
     "/uebersicht — was ich mache + aktueller Stand (Einstieg)\n"
     "/sync    — jetzt aktuelle Zahlen ziehen (eBay) + neu rechnen\n"
+    "/rechnungen — Rechnungen aus eBay-Verkaeufen erzeugen + nach Lexware\n"
     "/status  — Kurzueberblick (offene Faelle)\n"
     "/report  — Dashboard: Umsaetze, USt, Schwellen aus dem letzten Sync\n"
     "/schwellen — § 19- und OSS-Schwellen-Status\n"
@@ -61,6 +62,7 @@ class TelegramBot:
     status_path: str = ""
     owner_store: str = ""        # Datei, in der der erste Nutzer als Eigentuemer gespeichert wird
     pipeline_callback: Optional[Callable[[], str]] = None  # /sync: zieht Daten + rechnet
+    rechnungen_callback: Optional[Callable[[], str]] = None  # /rechnungen: erzeugt + pusht
     _offset: int = 0
 
     def __post_init__(self):
@@ -157,7 +159,29 @@ class TelegramBot:
             return self._cmd_duden(arg)
         if cmd in ("/sync", "/aktualisieren"):
             return self._cmd_sync(user_id)
+        if cmd in ("/rechnungen", "/rechnung"):
+            return self._cmd_rechnungen(user_id)
         return "Unbekannter Befehl. /help fuer die Liste."
+
+    def _cmd_rechnungen(self, chat_id: int) -> str:
+        """Erzeugt Rechnungen aus den eBay-Verkaeufen (und pusht sie ggf. nach Lexware)."""
+        if self.rechnungen_callback is None:
+            return ("Rechnungserstellung ist hier nicht aktiv. Starte den Agenten mit "
+                    "`python run.py telegram` (dort ist sie angebunden).")
+        import threading
+
+        def job():
+            try:
+                zusammenfassung = self.rechnungen_callback()
+            except Exception as exc:  # noqa: BLE001
+                zusammenfassung = f"Rechnungserstellung fehlgeschlagen: {exc}"
+            try:
+                self.send_message(chat_id, "🧾 " + zusammenfassung)
+            except Exception:  # noqa: BLE001
+                pass
+
+        threading.Thread(target=job, daemon=True).start()
+        return "🧾 Ich erstelle die offenen Rechnungen — ich melde mich gleich mit dem Ergebnis."
 
     def _cmd_sync(self, chat_id: int) -> str:
         """Loest den Datenabruf + die Neuberechnung aus (laeuft im Hintergrund)."""

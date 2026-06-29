@@ -18,6 +18,8 @@ Verwendung:
     python run.py ebay-kaeufe-api      # Kaeufe der letzten ~90 Tage live via Trading-API holen
     python run.py ebay-signkey         # Ed25519-Signaturschluessel fuer Finances-API erstellen
     python run.py ebay-finances [tage] # ECHTE eBay-Gebuehren signiert abrufen (data/ebay_fees.json)
+    python run.py rechnungen           # Rechnungen aus eBay-Verkaeufen erzeugen (Billbee-Ersatz)
+    python run.py rechnungen-push      # Erzeugte Rechnungen nach Lexware Office uebertragen
     python run.py lexware-ping         # Lexware-API-Key verifizieren (/profile)
     python run.py bank-import <csv>    # Lexware-Geschaeftskonto-CSV importieren
     python run.py lexware-push <dir>   # Belege aus <dir> als Draft-Vouchers nach Lexware
@@ -158,6 +160,23 @@ def cmd_telegram_check(config: dict) -> int:
     return 0
 
 
+def _rechnungen_zusammenfassung(config: dict) -> str:
+    """Erzeugt Rechnungen (+ optional Lexware-Push) und liefert eine kurze Meldung."""
+    cmd_rechnungen(config)
+    reg = _rechnungs_register(config)
+    gesamt = len(reg.alle())
+    offen_lex = len(reg.offene_lexware())
+    teile = [f"{gesamt} Rechnungen im Register."]
+    rc = _rechnung_config(config)
+    if rc.get("lexware", {}).get("push") and \
+            config.get("integrationen", {}).get("lexware_office", {}).get("api_key"):
+        cmd_rechnungen_push(config)
+        teile.append(f"{len(reg.offene_lexware())} noch offen für Lexware.")
+    elif offen_lex:
+        teile.append(f"{offen_lex} noch nicht in Lexware (push deaktiviert).")
+    return " ".join(teile)
+
+
 def cmd_telegram(config: dict) -> int:
     from src.audit import AuditLog
     from src.interface import TelegramBot
@@ -186,6 +205,7 @@ def cmd_telegram(config: dict) -> int:
         owner_store=owner_store,
         pipeline_callback=lambda: (cmd_run_all(config),
                                    "Zahlen aktualisiert.")[1],
+        rechnungen_callback=lambda: _rechnungen_zusammenfassung(config),
     )
     bot.run(poll_timeout=int(tg.get("poll_timeout", 30)))
     return 0
@@ -559,6 +579,155 @@ def _ebay_verkaeufe(config: dict):
     return importiere_ebay_verkaeufe(rows) if rows else []
 
 
+def _rechnung_config(config: dict) -> dict:
+    return config.get("rechnung", {}) or {}
+
+
+def _absender(config: dict):
+    from src.rechnung import Absender
+    a = _rechnung_config(config).get("absender", {}) or {}
+    # Fallback: Firmenname aus unternehmen.name, wenn absender.name leer.
+    name = a.get("name") or config.get("unternehmen", {}).get("name", "")
+    return Absender(
+        name=name, strasse=a.get("strasse", ""), plz=str(a.get("plz", "")),
+        ort=a.get("ort", ""), land=a.get("land", "DE"),
+        steuernummer=str(a.get("steuernummer", "")), ust_id=a.get("ust_id", ""),
+        email=a.get("email", ""), telefon=str(a.get("telefon", "")),
+        iban=a.get("iban", ""), bic=a.get("bic", ""))
+
+
+def _nummernkreis(config: dict):
+    from src.rechnung import Nummernkreis
+    rc = _rechnung_config(config)
+    return Nummernkreis(
+        pfad=rc.get("nummernkreis", "data/rechnungsnummern.json"),
+        prefix=rc.get("nummer_prefix", ""),
+        mit_jahr=bool(rc.get("nummer_mit_jahr", True)),
+        start=int(rc.get("nummer_start", 1)))
+
+
+def _rechnungs_register(config: dict):
+    from src.rechnung import RechnungsRegister
+    return RechnungsRegister(pfad=_rechnung_config(config).get(
+        "register", "data/rechnungen_register.json"))
+
+
+def cmd_rechnungen(config: dict) -> int:
+    """Erzeugt fuer jeden eBay-Verkauf (ab Geschaeftsbeginn) eine Rechnung,
+    rendert HTML+Text, archiviert sie und fuehrt ein idempotentes Register.
+    Doppellaeufe erzeugen KEINE neuen Rechnungen (Register schuetzt davor)."""
+    import json
+    from src.rechnung import rechnung_aus_verkauf, render_html, render_text
+    from src.util import ab_geschaeftsbeginn
+    rc = _rechnung_config(config)
+    if not rc.get("aktiv", True):
+        print("Rechnungserstellung in config.yaml deaktiviert (rechnung.aktiv: false).")
+        return 0
+    if rc.get("modus", "alle") == "manuell":
+        print("Modus 'manuell' — Rechnungen nur gezielt erzeugen (noch nicht implementiert: einzeln).")
+        return 0
+    absender = _absender(config)
+    fehlt = absender.vollstaendig()
+    if fehlt:
+        print(f"⚠ Absenderdaten unvollstaendig ({', '.join(fehlt)}). Rechnungen werden "
+              "erzeugt, sind aber erst mit vollstaendigem rechnung.absender rechtsgueltig.")
+    beginn = _geschaeftsbeginn(config)
+    sales = [s for s in _ebay_verkaeufe(config)
+             if (not beginn or ab_geschaeftsbeginn(s.datum, beginn))]
+    if not sales:
+        print("Keine eBay-Verkaeufe gefunden. Zuerst `ebay-verkaeufe-api` ausfuehren.")
+        return 0
+    nk = _nummernkreis(config)
+    reg = _rechnungs_register(config)
+    verzeichnis = rc.get("verzeichnis", "belege/rechnungen/")
+    os.makedirs(verzeichnis, exist_ok=True)
+    ku = bool(config.get("steuer", {}).get("kleinunternehmer", True))
+    hinweis = rc.get("kleinunternehmer_hinweis") or None
+    neu = 0
+    # Aeltere Verkaeufe zuerst -> Nummern in zeitlicher Reihenfolge.
+    for s in sorted(sales, key=lambda x: (x.datum, str(x.id))):
+        if reg.hat(str(s.id)):
+            continue
+        nummer = nk.naechste(s.datum.year)
+        r = rechnung_aus_verkauf(s, nummer=nummer, absender=absender,
+                                 kleinunternehmer=ku, hinweis=hinweis)
+        basis = os.path.join(verzeichnis, nummer.replace("/", "-"))
+        with open(basis + ".html", "w", encoding="utf-8") as fh:
+            fh.write(render_html(r))
+        with open(basis + ".txt", "w", encoding="utf-8") as fh:
+            fh.write(render_text(r))
+        with open(basis + ".json", "w", encoding="utf-8") as fh:
+            json.dump(r.als_dict(), fh, ensure_ascii=False, indent=2)
+        reg.merke(str(s.id), nummer, datei=basis + ".html", betrag=str(r.summe),
+                  datum=r.datum.isoformat())
+        neu += 1
+    gesamt = len(reg.alle())
+    print(f"Rechnungen: {neu} neu erzeugt -> {verzeichnis} "
+          f"({gesamt} gesamt im Register).")
+    if rc.get("lexware", {}).get("push"):
+        print("Tipp: `python run.py rechnungen-push` uebertraegt offene Rechnungen nach Lexware.")
+    return 0
+
+
+def cmd_rechnungen_push(config: dict) -> int:
+    """Uebertraegt lokal erzeugte, noch nicht uebermittelte Rechnungen nach Lexware
+    Office (Entwurf; mit rechnung.lexware.finalize: true festgeschrieben)."""
+    from src.integrations import LexwareInvoiceClient
+    from src.rechnung import rechnung_aus_verkauf
+    rc = _rechnung_config(config)
+    lex = config.get("integrationen", {}).get("lexware_office", {})
+    api_key = lex.get("api_key")
+    if not api_key:
+        print("Kein Lexware-API-Key in config.yaml (integrationen.lexware_office.api_key).")
+        return 2
+    reg = _rechnungs_register(config)
+    offen = reg.offene_lexware()
+    if not offen:
+        print("Keine offenen Rechnungen fuer Lexware (alles uebertragen).")
+        return 0
+    sales_by_id = {str(s.id): s for s in _ebay_verkaeufe(config)}
+    absender = _absender(config)
+    ku = bool(config.get("steuer", {}).get("kleinunternehmer", True))
+    hinweis = rc.get("kleinunternehmer_hinweis") or None
+    finalize = bool(rc.get("lexware", {}).get("finalize", False))
+    pdf_speichern = bool(rc.get("lexware", {}).get("pdf_speichern", True))
+    verzeichnis = rc.get("verzeichnis", "belege/rechnungen/")
+    client = LexwareInvoiceClient(api_key=api_key,
+                                  base_url=lex.get("base_url", "https://api.lexware.io/v1"))
+    erfolg, fehler = 0, 0
+    for bid in offen:
+        eintrag = reg.eintrag(bid) or {}
+        nummer = eintrag.get("nummer", "")
+        sale = sales_by_id.get(bid)
+        if sale is None:
+            print(f"  ⚠ Verkauf {bid} (Rechnung {nummer}) nicht mehr im Export — uebersprungen.")
+            fehler += 1
+            continue
+        r = rechnung_aus_verkauf(sale, nummer=nummer, absender=absender,
+                                 kleinunternehmer=ku, hinweis=hinweis)
+        try:
+            res = client.rechnung_anlegen(r, finalize=finalize)
+            lex_id = res.get("id", "")
+            extra = {"lexware_id": lex_id, "lexware_finalized": finalize}
+            if pdf_speichern and lex_id:
+                try:
+                    pdf = client.pdf_laden(lex_id)
+                    pdf_pfad = os.path.join(verzeichnis, nummer.replace("/", "-") + ".pdf")
+                    with open(pdf_pfad, "wb") as fh:
+                        fh.write(pdf)
+                    extra["pdf"] = pdf_pfad
+                except Exception as exc:  # noqa: BLE001 - PDF optional
+                    print(f"  (PDF fuer {nummer} nicht geladen: {exc})")
+            reg.merke(bid, nummer, **extra)
+            erfolg += 1
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ⚠ {nummer}: Lexware-Push fehlgeschlagen: {exc}")
+            fehler += 1
+    status = "festgeschrieben" if finalize else "als Entwurf"
+    print(f"Lexware: {erfolg} Rechnungen {status} uebertragen, {fehler} Fehler.")
+    return 0 if fehler == 0 else 1
+
+
 def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     from decimal import Decimal
     from src.reconciliation import Reconciler, MatchStatus
@@ -835,6 +1004,17 @@ def cmd_check(config: dict) -> int:
     print(zeile(os.path.isdir(pfade.get("belege_inbox", "")), "Beleg-Inbox",
                f"Ordner {pfade.get('belege_inbox', 'inbox/belege/')} anlegen"))
 
+    print("\nRechnungen (Billbee-Ersatz):")
+    absender = _absender(config)
+    fehlt_abs = absender.vollstaendig()
+    print(zeile(not fehlt_abs, "Absenderdaten (§14 UStG)",
+               f"in config.yaml rechnung.absender ergaenzen: {', '.join(fehlt_abs)}"
+               if fehlt_abs else ""))
+    rcfg = config.get("rechnung", {}) or {}
+    push_an = rcfg.get("lexware", {}).get("push")
+    print(zeile(True, f"Rechnungs-Push nach Lexware: {'an' if push_an else 'aus (manuell)'}"
+               + (" · festgeschrieben" if rcfg.get('lexware', {}).get('finalize') else " · Entwurf")))
+
     print("\nInterfaces:")
     print(zeile(bool(tg.get("token")), "Telegram-Token"))
     print(zeile(bool(tg.get("allowed_user_ids")), "Telegram allowed_user_ids",
@@ -1035,6 +1215,14 @@ def cmd_run_all(config: dict) -> int:
         _schritt("eBay-Gebuehren (Finances-API, signiert)",
                  lambda: cmd_ebay_finances(config))
 
+    # 2c) Rechnungen erzeugen (Billbee-Ersatz) + optional nach Lexware pushen.
+    rc = config.get("rechnung", {}) or {}
+    if rc.get("aktiv", True) and rc.get("modus", "alle") != "manuell":
+        _schritt("Rechnungen erzeugen", lambda: cmd_rechnungen(config))
+        if rc.get("lexware", {}).get("push") and \
+                config.get("integrationen", {}).get("lexware_office", {}).get("api_key"):
+            _schritt("Rechnungen -> Lexware", lambda: cmd_rechnungen_push(config))
+
     # 3) Auswertung — rechnet mit allem, was da ist (eBay-Verkaeufe genuegen;
     #    Belege/Konto-CSV werden einbezogen, wenn vorhanden).
     _schritt("Auswertung (§25a, USt-VA, EÜR, Schwellen, Reconciliation)",
@@ -1089,6 +1277,8 @@ COMMANDS = {
     "ebay-verkaeufe-api": cmd_ebay_verkaeufe_api,
     "ebay-signkey": cmd_ebay_signkey,
     "ebay-finances": cmd_ebay_finances,
+    "rechnungen": cmd_rechnungen,
+    "rechnungen-push": cmd_rechnungen_push,
     "lexware-ping": cmd_lexware_ping,
     "bank-import": cmd_bank_import,
     "sync": cmd_sync,

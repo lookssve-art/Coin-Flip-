@@ -52,6 +52,18 @@ def _order_country(order) -> str:
     return "DE"
 
 
+def _order_buyer(order) -> dict:
+    """Liefert Name + Anschrift des Kaeufers aus der ShippingAddress (fuer Rechnungen)."""
+    for sub in order.iter():
+        if _local(sub.tag) in ("ShippingAddress", "Address"):
+            def t(name):
+                el = _find(sub, name)
+                return el.text.strip() if el is not None and el.text else ""
+            return {"name": t("Name"), "street": t("Street1") or t("Street"),
+                    "zip": t("PostalCode"), "city": t("CityName")}
+    return {"name": "", "street": "", "zip": "", "city": ""}
+
+
 def parse_seller_orders(xml: str, *, default_tax_scheme: str = "differenz") -> list[dict]:
     """Extrahiert Verkaufszeilen aus einer GetOrders-Antwort (OrderRole=Seller).
 
@@ -70,6 +82,7 @@ def parse_seller_orders(xml: str, *, default_tax_scheme: str = "differenz") -> l
         created = _find(order, "CreatedTime")
         datum = (created.text[:10] if created is not None and created.text else None)
         land = _order_country(order)
+        kaeufer = _order_buyer(order)
         for trans in order.iter():
             if _local(trans.tag) != "Transaction":
                 continue
@@ -98,6 +111,10 @@ def parse_seller_orders(xml: str, *, default_tax_scheme: str = "differenz") -> l
                 "fees": "0",
                 "product_id": pid,
                 "buyer_country": land,
+                "buyer_name": kaeufer["name"],
+                "buyer_street": kaeufer["street"],
+                "buyer_zip": kaeufer["zip"],
+                "buyer_city": kaeufer["city"],
                 "tax_scheme": default_tax_scheme,
             })
     return rows
