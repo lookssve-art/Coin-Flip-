@@ -110,6 +110,8 @@ def parse_seller_orders(xml: str, *, default_tax_scheme: str = "differenz") -> l
                        else (order_id.text.strip() if order_id is not None and order_id.text else "")),
                 "date": datum,
                 "gross": gross,
+                "quantity": str(anzahl),
+                "unit_price": einzel,
                 "fees": "0",
                 "product_id": pid,
                 "title": titel,

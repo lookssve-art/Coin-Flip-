@@ -128,6 +128,8 @@ class PlatformSale:
     refund: Decimal = Decimal("0")
     product_id: Optional[str] = None
     product_name: str = ""                       # Artikeltitel (fuer Rechnungs-Bezeichnung)
+    menge: Decimal = Decimal("1")                # verkaufte Stueckzahl (eBay QuantityPurchased)
+    einzelpreis: Decimal = Decimal("0")          # Einzelpreis (eBay TransactionPrice); 0 = aus brutto/menge
     customer_country: str = "DE"
     customer_name: str = ""                      # Rechnungsadresse (soweit von eBay geliefert)
     customer_street: str = ""

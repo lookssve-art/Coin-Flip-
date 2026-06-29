@@ -22,6 +22,8 @@ class _Sale:
     brutto: Decimal
     product_id: str = "Artikel-X"
     product_name: str = ""
+    menge: Decimal = Decimal("1")
+    einzelpreis: Decimal = Decimal("0")
     customer_country: str = "DE"
     customer_name: str = ""
 
@@ -76,6 +78,25 @@ class TestGenerator(unittest.TestCase):
         self.assertEqual(r.bestell_referenz, "ORD-1")
         self.assertTrue(r.kleinunternehmer)
         self.assertEqual(r.empfaenger.land, "FR")
+
+    def test_stueckzahl_und_einzelpreis(self):
+        s = _Sale("ORD-9", date(2026, 6, 10), Decimal("13.50"),
+                  product_name="Booster Pack", menge=Decimal("3"),
+                  einzelpreis=Decimal("4.50"))
+        r = rechnung_aus_verkauf(s, nummer="2026-0009", absender=_absender())
+        p = r.positionen[0]
+        self.assertEqual(p.menge, Decimal("3"))
+        self.assertEqual(p.einzelpreis, Decimal("4.50"))
+        self.assertEqual(p.gesamt, Decimal("13.50"))
+        self.assertEqual(r.summe, Decimal("13.50"))
+
+    def test_einzelpreis_faellt_auf_brutto_durch_menge(self):
+        # ohne expliziten Einzelpreis: aus brutto/menge ableiten
+        s = _Sale("ORD-8", date(2026, 6, 10), Decimal("30.00"), menge=Decimal("2"))
+        r = rechnung_aus_verkauf(s, nummer="2026-0008", absender=_absender())
+        p = r.positionen[0]
+        self.assertEqual(p.einzelpreis, Decimal("15.00"))
+        self.assertEqual(p.gesamt, Decimal("30.00"))
 
     def test_artikeltitel_bevorzugt_vor_itemid(self):
         s = _Sale("ORD-1", date(2026, 6, 10), Decimal("3.00"),

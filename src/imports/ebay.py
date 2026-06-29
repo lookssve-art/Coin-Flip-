@@ -23,6 +23,12 @@ def _dec(value, default: str = "0") -> Decimal:
     return Decimal(str(value).replace(",", "."))
 
 
+def _menge(value) -> Decimal:
+    """Stueckzahl; faellt auf 1 zurueck, wenn nichts/0 geliefert wird."""
+    m = _dec(value, default="1")
+    return m if m > 0 else Decimal("1")
+
+
 def _datum(value) -> date:
     if isinstance(value, date) and not isinstance(value, datetime):
         return value
@@ -53,6 +59,8 @@ def importiere_ebay_verkaeufe(rows: list[dict]) -> list[PlatformSale]:
             refund=_dec(row.get("refund")),
             product_id=row.get("product_id"),
             product_name=str(row.get("title") or row.get("product_name") or ""),
+            menge=_menge(row.get("quantity")),
+            einzelpreis=_dec(row.get("unit_price")),
             customer_country=str(row.get("buyer_country") or row.get("country") or "DE").upper(),
             customer_name=str(row.get("buyer_name") or row.get("customer_name") or ""),
             customer_street=str(row.get("buyer_street") or ""),

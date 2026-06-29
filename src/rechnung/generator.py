@@ -31,8 +31,15 @@ def rechnung_aus_verkauf(sale, *, nummer: str, absender: Absender,
                       strasse=getattr(sale, "customer_street", "") or "",
                       plz=getattr(sale, "customer_zip", "") or "",
                       ort=getattr(sale, "customer_city", "") or "")
-    pos = Position(bezeichnung=str(bezeichnung), menge=Decimal("1"),
-                   einzelpreis=Decimal(str(getattr(sale, "brutto", "0"))))
+    # Stueckzahl + Einzelpreis aus eBay; Einzelpreis sonst aus brutto/menge ableiten.
+    brutto = Decimal(str(getattr(sale, "brutto", "0")))
+    menge = Decimal(str(getattr(sale, "menge", "1") or "1"))
+    if menge <= 0:
+        menge = Decimal("1")
+    einzel = Decimal(str(getattr(sale, "einzelpreis", "0") or "0"))
+    if einzel <= 0:
+        einzel = (brutto / menge).quantize(Decimal("0.01")) if menge else brutto
+    pos = Position(bezeichnung=str(bezeichnung), menge=menge, einzelpreis=einzel)
     r = Rechnung(
         nummer=nummer,
         datum=getattr(sale, "datum", date.today()),
