@@ -18,6 +18,7 @@ Verwendung:
     python run.py ebay-kaeufe-api      # Kaeufe der letzten ~90 Tage live via Trading-API holen
     python run.py ebay-signkey         # Ed25519-Signaturschluessel fuer Finances-API erstellen
     python run.py ebay-finances [tage] # ECHTE eBay-Gebuehren signiert abrufen (data/ebay_fees.json)
+    python run.py rechnung-setup ...   # Absenderdaten in config.yaml schreiben (Firmenangaben)
     python run.py rechnungen           # Rechnungen aus eBay-Verkaeufen erzeugen (Billbee-Ersatz)
     python run.py rechnungen-push      # Erzeugte Rechnungen nach Lexware Office uebertragen
     python run.py lexware-ping         # Lexware-API-Key verifizieren (/profile)
@@ -258,6 +259,98 @@ def cmd_ebay_token(config: dict, code: str = "") -> int:
     else:
         print("Refresh-Token erhalten (config.yaml nicht gefunden — bitte manuell eintragen):\n")
         print(tok.refresh_token)
+    return 0
+
+
+def _yaml_escape(s: str) -> str:
+    return str(s).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _rechnung_block(name="", strasse="", plz="", ort="", steuernummer="",
+                    ust_id="", iban="") -> str:
+    e = _yaml_escape
+    return (
+        "\n# --- Rechnungsstellung (Billbee-Ersatz) — via `rechnung-setup` gesetzt ---\n"
+        "rechnung:\n"
+        "  aktiv: true\n"
+        '  modus: "alle"\n'
+        '  nummer_prefix: ""\n'
+        "  nummer_mit_jahr: true\n"
+        "  nummer_start: 1\n"
+        '  kleinunternehmer_hinweis: "Gemäß § 19 UStG wird keine Umsatzsteuer '
+        'berechnet (Kleinunternehmer)."\n'
+        '  verzeichnis: "belege/rechnungen/"\n'
+        '  register: "data/rechnungen_register.json"\n'
+        '  nummernkreis: "data/rechnungsnummern.json"\n'
+        "  lexware:\n"
+        "    push: false\n"
+        "    finalize: false\n"
+        "    pdf_speichern: true\n"
+        "  absender:\n"
+        f'    name: "{e(name)}"\n'
+        f'    strasse: "{e(strasse)}"\n'
+        f'    plz: "{e(plz)}"\n'
+        f'    ort: "{e(ort)}"\n'
+        '    land: "DE"\n'
+        f'    steuernummer: "{e(steuernummer)}"\n'
+        f'    ust_id: "{e(ust_id)}"\n'
+        '    email: ""\n'
+        '    telefon: ""\n'
+        f'    iban: "{e(iban)}"\n'
+        '    bic: ""\n'
+    )
+
+
+def _absender_feld_setzen(txt: str, feld: str, wert: str) -> str:
+    """Ersetzt EIN Feld im absender-Block (Zeilen nach 'absender:'), formaterhaltend."""
+    import re
+    idx = txt.find("\n  absender:")
+    if idx < 0:
+        return txt
+    kopf, rest = txt[:idx], txt[idx:]
+    neu, n = re.subn(rf'(?m)^(\s+{feld}:\s*).*$',
+                     lambda m: m.group(1) + '"' + _yaml_escape(wert) + '"', rest, count=1)
+    return kopf + (neu if n else rest)
+
+
+def cmd_rechnung_setup(config: dict, name: str = "", strasse: str = "", plz: str = "",
+                       ort: str = "", steuernummer: str = "", iban: str = "",
+                       ust_id: str = "") -> int:
+    """Schreibt die Absenderdaten in config.yaml — legt den rechnung-Block an
+    (falls fehlt) oder aktualisiert die absender-Felder (falls vorhanden)."""
+    path = "config.yaml"
+    if not os.path.exists(path):
+        print("config.yaml nicht gefunden (im Projektordner ausfuehren).")
+        return 2
+    with open(path, "r", encoding="utf-8") as fh:
+        txt = fh.read()
+    import re
+    if re.search(r"(?m)^rechnung:", txt):
+        # Block existiert -> nur die uebergebenen Felder aktualisieren.
+        felder = {"name": name, "strasse": strasse, "plz": plz, "ort": ort,
+                  "steuernummer": steuernummer, "iban": iban, "ust_id": ust_id}
+        for feld, wert in felder.items():
+            if wert:
+                txt = _absender_feld_setzen(txt, feld, wert)
+        aktion = "absender-Felder aktualisiert"
+    else:
+        if not txt.endswith("\n"):
+            txt += "\n"
+        txt += _rechnung_block(name, strasse, plz, ort, steuernummer, ust_id, iban)
+        aktion = "rechnung-Block angelegt"
+    # Sicherheits-Check: bleibt es gueltiges YAML?
+    try:
+        import yaml
+        yaml.safe_load(txt)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Abbruch — Ergebnis waere ungueltiges YAML ({exc}). config.yaml unveraendert.")
+        return 1
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(txt)
+    print(f"✅ config.yaml: {aktion}.")
+    print(f"   Absender: {name}, {strasse}, {plz} {ort}")
+    print(f"   Steuernummer: {steuernummer or '(noch leer — spaeter nachtragen)'}")
+    print("   Pruefen:  python run.py check")
     return 0
 
 
@@ -1277,6 +1370,7 @@ COMMANDS = {
     "ebay-verkaeufe-api": cmd_ebay_verkaeufe_api,
     "ebay-signkey": cmd_ebay_signkey,
     "ebay-finances": cmd_ebay_finances,
+    "rechnung-setup": cmd_rechnung_setup,
     "rechnungen": cmd_rechnungen,
     "rechnungen-push": cmd_rechnungen_push,
     "lexware-ping": cmd_lexware_ping,
