@@ -54,7 +54,7 @@ _SELLER_XML = """<?xml version="1.0" encoding="UTF-8"?>
       <TransactionArray>
         <Transaction>
           <TransactionID>T1</TransactionID>
-          <Item><ItemID>999</ItemID><SKU>CHARIZARD-PSA10</SKU></Item>
+          <Item><ItemID>999</ItemID><SKU>CHARIZARD-PSA10</SKU><Title>Charizard PSA 10 Holo</Title></Item>
           <TransactionPrice currencyID="EUR">120.00</TransactionPrice>
           <QuantityPurchased>1</QuantityPurchased>
         </Transaction>
@@ -71,6 +71,7 @@ class TestParseSellerOrders(unittest.TestCase):
         rows = parse_seller_orders(_SELLER_XML, default_tax_scheme="differenz")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["product_id"], "CHARIZARD-PSA10")
+        self.assertEqual(rows[0]["title"], "Charizard PSA 10 Holo")
         self.assertEqual(rows[0]["gross"], "120.00")
         self.assertEqual(rows[0]["buyer_country"], "FR")
         self.assertEqual(rows[0]["tax_scheme"], "differenz")

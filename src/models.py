@@ -127,6 +127,7 @@ class PlatformSale:
     versand: Decimal = Decimal("0")
     refund: Decimal = Decimal("0")
     product_id: Optional[str] = None
+    product_name: str = ""                       # Artikeltitel (fuer Rechnungs-Bezeichnung)
     customer_country: str = "DE"
     customer_name: str = ""                      # Rechnungsadresse (soweit von eBay geliefert)
     customer_street: str = ""

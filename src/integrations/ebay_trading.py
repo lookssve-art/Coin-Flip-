@@ -89,6 +89,8 @@ def parse_seller_orders(xml: str, *, default_tax_scheme: str = "differenz") -> l
             item = _find(trans, "Item")
             item_id = _find(item, "ItemID") if item is not None else None
             sku = _find(item, "SKU") if item is not None else None
+            titel_el = _find(item, "Title") if item is not None else None
+            titel = (titel_el.text.strip() if titel_el is not None and titel_el.text else "")
             preis = _find(trans, "TransactionPrice")
             menge = _find(trans, "QuantityPurchased")
             pid = None
@@ -110,6 +112,7 @@ def parse_seller_orders(xml: str, *, default_tax_scheme: str = "differenz") -> l
                 "gross": gross,
                 "fees": "0",
                 "product_id": pid,
+                "title": titel,
                 "buyer_country": land,
                 "buyer_name": kaeufer["name"],
                 "buyer_street": kaeufer["street"],

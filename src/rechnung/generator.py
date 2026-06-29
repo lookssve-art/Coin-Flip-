@@ -22,7 +22,9 @@ def rechnung_aus_verkauf(sale, *, nummer: str, absender: Absender,
     ``sale`` braucht mindestens ``id``, ``datum``, ``brutto``; optionale Felder
     ``product_id``, ``customer_name``, ``customer_country`` werden genutzt.
     """
-    bezeichnung = getattr(sale, "product_id", None) or "Artikel (eBay-Verkauf)"
+    # Bezeichnung: Artikeltitel bevorzugen, sonst SKU/ItemID, sonst Platzhalter.
+    bezeichnung = (getattr(sale, "product_name", "") or getattr(sale, "product_id", None)
+                   or "Artikel (eBay-Verkauf)")
     name = getattr(sale, "customer_name", "") or ""
     land = getattr(sale, "customer_country", "DE") or "DE"
     empf = Empfaenger(name=name, land=land,

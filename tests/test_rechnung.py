@@ -21,6 +21,7 @@ class _Sale:
     datum: date
     brutto: Decimal
     product_id: str = "Artikel-X"
+    product_name: str = ""
     customer_country: str = "DE"
     customer_name: str = ""
 
@@ -75,6 +76,12 @@ class TestGenerator(unittest.TestCase):
         self.assertEqual(r.bestell_referenz, "ORD-1")
         self.assertTrue(r.kleinunternehmer)
         self.assertEqual(r.empfaenger.land, "FR")
+
+    def test_artikeltitel_bevorzugt_vor_itemid(self):
+        s = _Sale("ORD-1", date(2026, 6, 10), Decimal("3.00"),
+                  product_id="227357704604", product_name="Pokemon Charizard Holo")
+        r = rechnung_aus_verkauf(s, nummer="2026-0001", absender=_absender())
+        self.assertEqual(r.positionen[0].bezeichnung, "Pokemon Charizard Holo")
 
     def test_render_enthaelt_pflichtangaben(self):
         s = _Sale("ORD-1", date(2026, 6, 10), Decimal("200.00"))
