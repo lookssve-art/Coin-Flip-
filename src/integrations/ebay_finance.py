@@ -114,13 +114,16 @@ class EbayFinanceClient:
 
     @staticmethod
     def fee_summary(transactions: list[dict]) -> dict:
-        """Aggregiert die echten eBay-Gebuehren aus den Transaktionen.
+        """Aggregiert die echten eBay-Gebuehren + trennt Werbe-/Anzeigengebuehren.
 
-        Gebuehren = Summe ``totalFeeAmount`` der SALE-Transaktionen
-        + Betraege separater Gebuehrenbuchungen (NON_SALE_CHARGE, SHIPPING_LABEL).
-        Liefert Decimals und die Anzahl Verkaeufe.
+        - fees_total : alle Gebuehren (Verkauf + Werbung + Sonstiges)
+        - werbung    : Anzeigen-/Promoted-Listings-Gebuehren (separat gebucht)
+        - gebuehren  : Verkaufsgebuehren = fees_total − werbung
+        Basis: ``totalFeeAmount`` der SALE-Transaktionen (mit Fee-Detail-Aufteilung,
+        soweit vorhanden) + separate NON_SALE_CHARGE/SHIPPING_LABEL-Buchungen.
         """
         fees = Decimal("0")
+        werbung = Decimal("0")
         sales_gross = Decimal("0")
         refunds = Decimal("0")
         n_sales = 0
@@ -128,18 +131,56 @@ class EbayFinanceClient:
             typ = (t.get("transactionType") or "").upper()
             if typ == "SALE":
                 n_sales += 1
-                fees += _dec(t.get("totalFeeAmount"))
-                sales_gross += _dec(t.get("amount")) + _dec(t.get("totalFeeAmount"))
+                tf = _dec(t.get("totalFeeAmount"))
+                fees += tf
+                sales_gross += _dec(t.get("amount")) + tf
+                werbung += _ad_fees_detail(t)
             elif typ in ("NON_SALE_CHARGE", "SHIPPING_LABEL"):
-                fees += abs(_dec(t.get("amount")))
+                amt = abs(_dec(t.get("amount")))
+                fees += amt
+                if _ist_werbung(t.get("feeType") or t.get("references")
+                                or t.get("bookingEntry") or ""):
+                    werbung += amt
             elif typ in ("REFUND", "CREDIT"):
                 refunds += _dec(t.get("amount"))
+        werbung = min(werbung, fees)  # nie mehr als die Gesamtgebuehren
+        gebuehren = fees - werbung
         return {
             "fees_total": fees.quantize(Decimal("0.01")),
+            "werbung": werbung.quantize(Decimal("0.01")),
+            "gebuehren": gebuehren.quantize(Decimal("0.01")),
             "sales_gross": sales_gross.quantize(Decimal("0.01")),
             "refunds_total": refunds.quantize(Decimal("0.01")),
             "n_sales": n_sales,
         }
+
+
+_WERBE_STICHWORTE = ("AD_FEE", "AD_SERVICE", "PROMOT", "ADVERT", "WERB", "ANZEIG",
+                     "PLA_", "SPONSORED")
+
+
+def _ist_werbung(feld) -> bool:
+    """Erkennt Werbe-/Promoted-Listings-Gebuehren am Fee-Type/Memo (robust)."""
+    text = str(feld).upper()
+    return any(w in text for w in _WERBE_STICHWORTE)
+
+
+def _ad_fees_detail(transaction: dict) -> Decimal:
+    """Summe der Werbegebuehren aus dem Fee-Detail einer SALE-Transaktion.
+
+    eBay liefert je Position ``orderLineItems[].marketplaceFees[]`` mit ``feeType``;
+    Promoted-Listings-Gebuehren werden darueber identifiziert.
+    """
+    summe = Decimal("0")
+    for oli in transaction.get("orderLineItems") or []:
+        for fee in oli.get("marketplaceFees") or []:
+            if _ist_werbung(fee.get("feeType") or fee.get("feeMemo") or ""):
+                summe += abs(_dec(fee.get("amount")))
+    # Manche Konten liefern die Fee-Liste direkt auf Transaktionsebene.
+    for fee in transaction.get("marketplaceFees") or []:
+        if _ist_werbung(fee.get("feeType") or fee.get("feeMemo") or ""):
+            summe += abs(_dec(fee.get("amount")))
+    return summe
 
 
 def _amount(node) -> str:

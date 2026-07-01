@@ -21,6 +21,7 @@ Verwendung:
     python run.py rechnung-setup ...   # Absenderdaten in config.yaml schreiben (Firmenangaben)
     python run.py rechnungen           # Rechnungen aus eBay-Verkaeufen erzeugen (Billbee-Ersatz)
     python run.py rechnungen-push      # Erzeugte Rechnungen nach Lexware Office uebertragen
+    python run.py buchhaltung          # ALLES: eBay->Rechnungen->Lexware->Gegenrechnung (1 Befehl)
     python run.py bwa                  # BWA/Monatsabschluss (Rohertrag, Kosten, Kennzahlen)
     python run.py pruefung             # Plausibilitaet (IBAN/USt-IdNr/Dubletten)
     python run.py kann                 # Funktionsumfang anzeigen (Master-Prompt-Abgleich)
@@ -483,7 +484,10 @@ def cmd_ebay_finances(config: dict, tage: str = "") -> int:
     ergebnis = {
         "stand": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "zeitraum": {"von": start.isoformat(), "bis": ende.isoformat()},
-        "fees_total": str(s["fees_total"]), "sales_gross": str(s["sales_gross"]),
+        "fees_total": str(s["fees_total"]),
+        "gebuehren": str(s.get("gebuehren", s["fees_total"])),
+        "werbung": str(s.get("werbung", "0")),
+        "sales_gross": str(s["sales_gross"]),
         "refunds_total": str(s["refunds_total"]), "n_sales": s["n_sales"],
         "transaktionen": len(txs),
     }
@@ -501,7 +505,8 @@ def cmd_ebay_finances(config: dict, tage: str = "") -> int:
         json.dump(payouts, fh, ensure_ascii=False, indent=2)
     print(f"Finances-API: {len(txs)} Transaktionen, {s['n_sales']} Verkaeufe "
           f"({start} – {ende}).")
-    print(f"  Echte eBay-Gebuehren: {s['fees_total']} EUR -> {pfad}")
+    print(f"  Echte eBay-Gebuehren: {s['fees_total']} EUR "
+          f"(davon Verkauf {s.get('gebuehren')} + Werbung {s.get('werbung')}) -> {pfad}")
     print(f"  eBay-Auszahlungen: {len(payouts)} -> {payout_pfad} (fuer Konto-Abgleich)")
     print(f"  (Brutto {s['sales_gross']} EUR, Refunds {s['refunds_total']} EUR)")
     print("  `python run.py sync` nutzt echte Gebuehren + Auszahlungen jetzt automatisch.")
@@ -944,6 +949,87 @@ def cmd_kann(config: dict) -> int:
     return 0
 
 
+def cmd_buchhaltung(config: dict) -> int:
+    """DER EINE BEFEHL — komplette Buchhaltung ab Geschaeftsbeginn:
+    eBay-Kaeufe+Verkaeufe ziehen, echte Gebuehren/Werbung/Auszahlungen holen,
+    Rechnungen erzeugen + nach Lexware, alles gegen die Verkaeufe rechnen (EÜR),
+    und eine saubere Schlussuebersicht ausgeben."""
+    from decimal import Decimal as D
+    ebay = config.get("integrationen", {}).get("ebay", {})
+    lex = config.get("integrationen", {}).get("lexware_office", {})
+    hat_token = bool(ebay.get("refresh_token") or ebay.get("access_token"))
+    tage = str(config.get("betrieb", {}).get("ebay_sync_tage", 30))
+    beginn = _geschaeftsbeginn(config)
+
+    print("🧮 Komplette Buchhaltung wird erstellt …\n")
+    if hat_token:
+        _schritt("1/6 eBay-Kaeufe (Wareneinkauf)", lambda: cmd_ebay_kaeufe_api(config, tage))
+        if os.path.exists(config.get("pfade", {}).get("ebay_kaeufe_export", "")):
+            _schritt("    Einkaufspreise (§25a)", lambda: cmd_ebay_kaeufe(config))
+        _schritt("2/6 eBay-Verkaeufe", lambda: cmd_ebay_verkaeufe_api(config, tage))
+        if os.path.exists(_signing_key_pfad(config)):
+            _schritt("3/6 Echte Gebuehren + Werbung + Auszahlungen",
+                     lambda: cmd_ebay_finances(config))
+        else:
+            print("3/6 Gebuehren: kein Signaturschluessel — Schaetzung wird genutzt "
+                  "(`python run.py ebay-signkey` fuer centgenaue Werte).")
+    else:
+        print("⚠ Kein eBay-Token — bitte `ebay-auth` + `ebay-token` zuerst.")
+
+    _schritt("4/6 Rechnungen erzeugen (ab Geschaeftsbeginn)", lambda: cmd_rechnungen(config))
+    if lex.get("api_key"):
+        _schritt("5/6 Rechnungen -> Lexware (Entwurf)", lambda: cmd_rechnungen_push(config))
+    else:
+        print("5/6 Lexware-Push uebersprungen (kein API-Key in config.yaml).")
+    _schritt("6/6 Gegenrechnung + EÜR (Verkaeufe − Gebuehren − Werbung − Wareneinkauf)",
+             lambda: cmd_sync(config))
+
+    # ---- Saubere Schlussuebersicht ----
+    euer = _lade_json(config.get("pfade", {}).get("euer_snapshot", "data/euer.json")) or {}
+    fees = _lade_json(config.get("pfade", {}).get("ebay_fees_export", "data/ebay_fees.json")) or {}
+    payouts = _lade_json(config.get("pfade", {}).get("ebay_payouts", "data/ebay_payouts.json")) or []
+    reg = _rechnungs_register(config)
+    kat = euer.get("ausgaben_je_kategorie", {}) or {}
+
+    def g(x):
+        try:
+            return D(str(x)).quantize(D("0.01"))
+        except Exception:  # noqa: BLE001
+            return D("0.00")
+
+    payout_summe = sum((g(p.get("amount")) for p in payouts), D("0"))
+    print("\n" + "═" * 52)
+    print("  BUCHHALTUNG — SAUBERE ÜBERSICHT")
+    print(f"  (ab {beginn or 'Geschaeftsbeginn'})")
+    print("═" * 52)
+    print(f"  Umsatz (Verkaeufe)        {g(euer.get('einnahmen_gesamt')):>12} EUR")
+    print(f"  − Wareneinkauf            {g(kat.get('wareneinkauf')):>12} EUR")
+    print(f"  − eBay-Verkaufsgebuehren  {g(kat.get('gebuehren')):>12} EUR")
+    print(f"  − eBay-Werbung/Anzeigen   {g(kat.get('werbung')):>12} EUR")
+    andere = sum((g(v) for k, v in kat.items()
+                  if k not in ("wareneinkauf", "gebuehren", "werbung")), D("0"))
+    if andere > 0:
+        print(f"  − sonstige Ausgaben       {andere:>12} EUR")
+    print("  " + "─" * 44)
+    print(f"  = GEWINN                  {g(euer.get('gewinn')):>12} EUR")
+    print("═" * 52)
+    print(f"  Rechnungen gesamt: {len(reg.alle())}  ·  "
+          f"noch nicht in Lexware: {len(reg.offene_lexware())}")
+    if payouts:
+        print(f"  eBay-Auszahlungen: {len(payouts)} · Summe {payout_summe} EUR")
+    if fees.get("werbung"):
+        print(f"  (Gebuehren echt aus eBay; Werbung separat: {fees.get('werbung')} EUR)")
+    else:
+        print("  (Tipp: `ebay-signkey` → centgenaue Gebuehren + Werbung getrennt)")
+    if not lex.get("api_key"):
+        print("  (Lexware-API-Key fehlt → Rechnungen noch nicht uebertragen)")
+    a = _absender(config)
+    if a.vollstaendig():
+        print("  ⚠ Absender unvollstaendig (Steuernummer?) → `rechnung-setup`")
+    print("═" * 52)
+    return 0
+
+
 def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     from decimal import Decimal
     from src.reconciliation import Reconciler, MatchStatus
@@ -1076,19 +1162,26 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     costs = config.get("costs", {})
     fees_pfad = config.get("pfade", {}).get("ebay_fees_export", "data/ebay_fees.json")
     fees_real = _lade_json(fees_pfad) if os.path.exists(fees_pfad) else None
+    werbung = Decimal("0")
     if fees_real and Decimal(str(fees_real.get("fees_total", "0"))) > 0:
-        gebuehren = Decimal(str(fees_real["fees_total"])).quantize(Decimal("0.01"))
+        # Verkaufsgebuehren und Werbe-/Anzeigengebuehren SEPARAT buchen.
+        gebuehren = Decimal(str(fees_real.get("gebuehren", fees_real["fees_total"]))).quantize(Decimal("0.01"))
+        werbung = Decimal(str(fees_real.get("werbung", "0"))).quantize(Decimal("0.01"))
         euer.hinweise.append(f"eBay-Gebuehren ECHT aus Finances-API ({fees_real.get('n_sales', '?')} "
-                             f"Verkaeufe, Stand {str(fees_real.get('stand', ''))[:10]}).")
+                             f"Verkaeufe): Verkauf {gebuehren} + Werbung {werbung} EUR "
+                             f"(Stand {str(fees_real.get('stand', ''))[:10]}).")
     else:
         fee_pct = Decimal(str(costs.get("ebay_fee_percent", 0.13)))
         fee_fix = Decimal(str(costs.get("ebay_fixed_per_order", 0.35)))
         gebuehren = (euer.einnahmen_gesamt * fee_pct + len(sales) * fee_fix).quantize(Decimal("0.01"))
         euer.hinweise.append(f"eBay-Gebuehren geschaetzt ({fee_pct*100:.0f} % + {fee_fix}/Verkauf); "
-                             "fuer centgenau: `python run.py ebay-finances`.")
+                             "fuer centgenau + Werbung getrennt: `python run.py ebay-finances`.")
     if gebuehren > 0:
         euer.ausgaben_je_kategorie["gebuehren"] = (
             euer.ausgaben_je_kategorie.get("gebuehren", Decimal("0")) + gebuehren)
+    if werbung > 0:
+        euer.ausgaben_je_kategorie["werbung"] = (
+            euer.ausgaben_je_kategorie.get("werbung", Decimal("0")) + werbung)
     # Gesamtsumme + Gewinn neu berechnen.
     euer.ausgaben_gesamt = sum(euer.ausgaben_je_kategorie.values(), Decimal("0"))
     euer.gewinn = euer.einnahmen_gesamt - euer.ausgaben_gesamt
@@ -1508,6 +1601,7 @@ COMMANDS = {
     "rechnung-setup": cmd_rechnung_setup,
     "rechnungen": cmd_rechnungen,
     "rechnungen-push": cmd_rechnungen_push,
+    "buchhaltung": cmd_buchhaltung,
     "bwa": cmd_bwa,
     "pruefung": cmd_pruefung,
     "kann": cmd_kann,

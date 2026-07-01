@@ -73,6 +73,24 @@ class TestFeeSummary(unittest.TestCase):
         self.assertEqual(s["sales_gross"], Decimal("166.00"))
         self.assertEqual(s["refunds_total"], Decimal("10.00"))
         self.assertEqual(s["n_sales"], 2)
+        # ohne Werbe-Detail: werbung 0, gebuehren = fees_total
+        self.assertEqual(s["werbung"], Decimal("0.00"))
+        self.assertEqual(s["gebuehren"], Decimal("23.95"))
+
+    def test_werbung_getrennt(self):
+        txs = [
+            {"transactionType": "SALE", "transactionId": "S1",
+             "amount": {"value": "80.00"}, "totalFeeAmount": {"value": "20.00"},
+             "orderLineItems": [{"marketplaceFees": [
+                 {"feeType": "FINAL_VALUE_FEE", "amount": {"value": "14.00"}},
+                 {"feeType": "AD_FEE", "amount": {"value": "6.00"}}]}]},
+            {"transactionType": "NON_SALE_CHARGE", "transactionId": "N1",
+             "feeType": "AD_FEE_PROMOTED_LISTINGS", "amount": {"value": "-3.00"}},
+        ]
+        s = EbayFinanceClient.fee_summary(txs)
+        self.assertEqual(s["fees_total"], Decimal("23.00"))   # 20 + 3
+        self.assertEqual(s["werbung"], Decimal("9.00"))       # 6 (AD_FEE) + 3 (NON_SALE ad)
+        self.assertEqual(s["gebuehren"], Decimal("14.00"))    # Rest = Verkaufsgebuehr
 
     def test_to_rows(self):
         rows = EbayFinanceClient.to_rows(_TX["transactions"])
