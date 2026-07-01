@@ -92,6 +92,21 @@ class TestFeeSummary(unittest.TestCase):
         self.assertEqual(s["werbung"], Decimal("9.00"))       # 6 (AD_FEE) + 3 (NON_SALE ad)
         self.assertEqual(s["gebuehren"], Decimal("14.00"))    # Rest = Verkaufsgebuehr
 
+    def test_versand_getrennt(self):
+        txs = [
+            {"transactionType": "SALE", "transactionId": "S1",
+             "amount": {"value": "80.00"}, "totalFeeAmount": {"value": "12.00"}},
+            {"transactionType": "SHIPPING_LABEL", "transactionId": "L1",
+             "amount": {"value": "-4.90"}},
+            {"transactionType": "NON_SALE_CHARGE", "transactionId": "N1",
+             "feeType": "SHIPPING_LABEL_FEE", "amount": {"value": "-3.50"}},
+        ]
+        s = EbayFinanceClient.fee_summary(txs)
+        # Versand NICHT in den Gebuehren
+        self.assertEqual(s["versand"], Decimal("8.40"))       # 4.90 + 3.50
+        self.assertEqual(s["fees_total"], Decimal("12.00"))   # nur Verkaufsgebuehr
+        self.assertEqual(s["gebuehren"], Decimal("12.00"))
+
     def test_to_rows(self):
         rows = EbayFinanceClient.to_rows(_TX["transactions"])
         self.assertEqual(rows[0]["gross"], "104.55")

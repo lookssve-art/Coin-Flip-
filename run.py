@@ -489,6 +489,7 @@ def cmd_ebay_finances(config: dict, tage: str = "") -> int:
         "fees_total": str(s["fees_total"]),
         "gebuehren": str(s.get("gebuehren", s["fees_total"])),
         "werbung": str(s.get("werbung", "0")),
+        "versand": str(s.get("versand", "0")),
         "sales_gross": str(s["sales_gross"]),
         "refunds_total": str(s["refunds_total"]), "n_sales": s["n_sales"],
         "transaktionen": len(txs),
@@ -508,7 +509,8 @@ def cmd_ebay_finances(config: dict, tage: str = "") -> int:
     print(f"Finances-API: {len(txs)} Transaktionen, {s['n_sales']} Verkaeufe "
           f"({start} – {ende}).")
     print(f"  Echte eBay-Gebuehren: {s['fees_total']} EUR "
-          f"(davon Verkauf {s.get('gebuehren')} + Werbung {s.get('werbung')}) -> {pfad}")
+          f"(Verkauf {s.get('gebuehren')} + Werbung {s.get('werbung')}); "
+          f"Versand separat: {s.get('versand')} EUR -> {pfad}")
     print(f"  eBay-Auszahlungen: {len(payouts)} -> {payout_pfad} (fuer Konto-Abgleich)")
     print(f"  (Brutto {s['sales_gross']} EUR, Refunds {s['refunds_total']} EUR)")
     print("  `python run.py sync` nutzt echte Gebuehren + Auszahlungen jetzt automatisch.")
@@ -1019,8 +1021,9 @@ def _buchhaltung_summary_text(config: dict) -> str:
     z.append(f"  − Wareneinkauf            {g(kat.get('wareneinkauf')):>11} EUR")
     z.append(f"  − eBay-Verkaufsgebuehren  {g(kat.get('gebuehren')):>11} EUR")
     z.append(f"  − eBay-Werbung/Anzeigen   {g(kat.get('werbung')):>11} EUR")
+    z.append(f"  − Versand/Porto           {g(kat.get('versand')):>11} EUR")
     andere = sum((g(v) for k, v in kat.items()
-                  if k not in ("wareneinkauf", "gebuehren", "werbung")), D("0"))
+                  if k not in ("wareneinkauf", "gebuehren", "werbung", "versand")), D("0"))
     if andere > 0:
         z.append(f"  − sonstige Ausgaben       {andere:>11} EUR")
     z.append("  " + "─" * 40)
@@ -1191,6 +1194,13 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     if werbung > 0:
         euer.ausgaben_je_kategorie["werbung"] = (
             euer.ausgaben_je_kategorie.get("werbung", Decimal("0")) + werbung)
+    # Bezahlte eBay-Versandlabels als Versand/Porto (eigene Betriebsausgabe).
+    if fees_real:
+        versand_ebay = Decimal(str(fees_real.get("versand", "0"))).quantize(Decimal("0.01"))
+        if versand_ebay > 0:
+            euer.ausgaben_je_kategorie["versand"] = (
+                euer.ausgaben_je_kategorie.get("versand", Decimal("0")) + versand_ebay)
+            euer.hinweise.append(f"eBay-Versandlabels {versand_ebay} EUR als Versand/Porto gebucht.")
     # Gesamtsumme + Gewinn neu berechnen.
     euer.ausgaben_gesamt = sum(euer.ausgaben_je_kategorie.values(), Decimal("0"))
     euer.gewinn = euer.einnahmen_gesamt - euer.ausgaben_gesamt

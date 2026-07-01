@@ -116,14 +116,15 @@ class EbayFinanceClient:
     def fee_summary(transactions: list[dict]) -> dict:
         """Aggregiert die echten eBay-Gebuehren + trennt Werbe-/Anzeigengebuehren.
 
-        - fees_total : alle Gebuehren (Verkauf + Werbung + Sonstiges)
-        - werbung    : Anzeigen-/Promoted-Listings-Gebuehren (separat gebucht)
+        - fees_total : Verkaufs- + Werbegebuehren (Provisionen) — OHNE Versand
         - gebuehren  : Verkaufsgebuehren = fees_total − werbung
-        Basis: ``totalFeeAmount`` der SALE-Transaktionen (mit Fee-Detail-Aufteilung,
-        soweit vorhanden) + separate NON_SALE_CHARGE/SHIPPING_LABEL-Buchungen.
+        - werbung    : Anzeigen-/Promoted-Listings-Gebuehren (separat)
+        - versand    : bezahlte eBay-Versandlabels (Porto, eigene Ausgabe!)
+        SHIPPING_LABEL wird bewusst NICHT als Gebuehr, sondern als Versand gebucht.
         """
         fees = Decimal("0")
         werbung = Decimal("0")
+        versand = Decimal("0")
         sales_gross = Decimal("0")
         refunds = Decimal("0")
         n_sales = 0
@@ -135,12 +136,19 @@ class EbayFinanceClient:
                 fees += tf
                 sales_gross += _dec(t.get("amount")) + tf
                 werbung += _ad_fees_detail(t)
-            elif typ in ("NON_SALE_CHARGE", "SHIPPING_LABEL"):
+            elif typ == "SHIPPING_LABEL":
+                versand += abs(_dec(t.get("amount")))
+            elif typ == "NON_SALE_CHARGE":
                 amt = abs(_dec(t.get("amount")))
-                fees += amt
-                if _ist_werbung(t.get("feeType") or t.get("references")
-                                or t.get("bookingEntry") or ""):
+                feld = (t.get("feeType") or t.get("references")
+                        or t.get("bookingEntry") or "")
+                if _ist_versand(feld):
+                    versand += amt          # Porto separat, keine Gebuehr
+                elif _ist_werbung(feld):
+                    fees += amt
                     werbung += amt
+                else:
+                    fees += amt
             elif typ in ("REFUND", "CREDIT"):
                 refunds += _dec(t.get("amount"))
         werbung = min(werbung, fees)  # nie mehr als die Gesamtgebuehren
@@ -149,6 +157,7 @@ class EbayFinanceClient:
             "fees_total": fees.quantize(Decimal("0.01")),
             "werbung": werbung.quantize(Decimal("0.01")),
             "gebuehren": gebuehren.quantize(Decimal("0.01")),
+            "versand": versand.quantize(Decimal("0.01")),
             "sales_gross": sales_gross.quantize(Decimal("0.01")),
             "refunds_total": refunds.quantize(Decimal("0.01")),
             "n_sales": n_sales,
@@ -157,12 +166,19 @@ class EbayFinanceClient:
 
 _WERBE_STICHWORTE = ("AD_FEE", "AD_SERVICE", "PROMOT", "ADVERT", "WERB", "ANZEIG",
                      "PLA_", "SPONSORED")
+_VERSAND_STICHWORTE = ("SHIPPING", "LABEL", "POSTAGE", "PORTO", "VERSAND", "DELIVERY")
 
 
 def _ist_werbung(feld) -> bool:
     """Erkennt Werbe-/Promoted-Listings-Gebuehren am Fee-Type/Memo (robust)."""
     text = str(feld).upper()
     return any(w in text for w in _WERBE_STICHWORTE)
+
+
+def _ist_versand(feld) -> bool:
+    """Erkennt Versand-/Portobuchungen (eBay-Label) am Fee-Type/Memo."""
+    text = str(feld).upper()
+    return any(w in text for w in _VERSAND_STICHWORTE)
 
 
 def _ad_fees_detail(transaction: dict) -> Decimal:
