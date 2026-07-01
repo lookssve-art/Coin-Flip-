@@ -30,6 +30,7 @@ _HELP = (
     "/approve <ID>  — Fall freigeben (z. B. /approve REV-00001)\n"
     "/reject <ID>   — Fall ablehnen\n"
     "/uebersicht — was ich mache + aktueller Stand (Einstieg)\n"
+    "/buchhaltung — ALLES auf einmal: eBay → Rechnungen → Lexware → Gegenrechnung\n"
     "/sync    — jetzt aktuelle Zahlen ziehen (eBay) + neu rechnen\n"
     "/rechnungen — Rechnungen aus eBay-Verkaeufen erzeugen + nach Lexware\n"
     "/bwa     — Monatsabschluss: Umsatz, Rohertrag, Kosten, Gewinn, Kennzahlen\n"
@@ -65,6 +66,7 @@ class TelegramBot:
     pipeline_callback: Optional[Callable[[], str]] = None  # /sync: zieht Daten + rechnet
     rechnungen_callback: Optional[Callable[[], str]] = None  # /rechnungen: erzeugt + pusht
     bwa_callback: Optional[Callable[[], str]] = None          # /bwa: Monatsabschluss
+    buchhaltung_callback: Optional[Callable[[], str]] = None  # /buchhaltung: ALLES
     _offset: int = 0
 
     def __post_init__(self):
@@ -161,6 +163,8 @@ class TelegramBot:
             return self._cmd_duden(arg)
         if cmd in ("/sync", "/aktualisieren"):
             return self._cmd_sync(user_id)
+        if cmd in ("/buchhaltung", "/alles"):
+            return self._cmd_buchhaltung(user_id)
         if cmd in ("/rechnungen", "/rechnung"):
             return self._cmd_rechnungen(user_id)
         if cmd in ("/bwa", "/monatsabschluss"):
@@ -171,6 +175,27 @@ class TelegramBot:
             except Exception as exc:  # noqa: BLE001
                 return f"BWA fehlgeschlagen: {exc}"
         return "Unbekannter Befehl. /help fuer die Liste."
+
+    def _cmd_buchhaltung(self, chat_id: int) -> str:
+        """Fuehrt die komplette Buchhaltung aus (der eine Knopf) — im Hintergrund."""
+        if self.buchhaltung_callback is None:
+            return ("Buchhaltung hier nicht aktiv. Starte mit `python run.py telegram` "
+                    "oder `serve` auf einem Rechner mit eBay/Lexware-Zugang.")
+        import threading
+
+        def job():
+            try:
+                zusammenfassung = self.buchhaltung_callback()
+            except Exception as exc:  # noqa: BLE001
+                zusammenfassung = f"Buchhaltung fehlgeschlagen: {exc}"
+            try:
+                self.send_message(chat_id, "✅ Buchhaltung fertig.\n\n" + zusammenfassung)
+            except Exception:  # noqa: BLE001
+                pass
+
+        threading.Thread(target=job, daemon=True).start()
+        return ("🧮 Ich mache die komplette Buchhaltung (eBay → Rechnungen → Lexware → "
+                "Gegenrechnung). Dauert 1–2 Minuten, ich melde mich mit dem Ergebnis.")
 
     def _cmd_rechnungen(self, chat_id: int) -> str:
         """Erzeugt Rechnungen aus den eBay-Verkaeufen (und pusht sie ggf. nach Lexware)."""

@@ -227,6 +227,8 @@ def cmd_telegram(config: dict) -> int:
                                    "Zahlen aktualisiert.")[1],
         rechnungen_callback=lambda: _rechnungen_zusammenfassung(config),
         bwa_callback=lambda: _bwa_text(config),
+        buchhaltung_callback=lambda: (cmd_buchhaltung(config),
+                                      _buchhaltung_summary_text(config))[1],
     )
     bot.run(poll_timeout=int(tg.get("poll_timeout", 30)))
     return 0
@@ -987,7 +989,15 @@ def cmd_buchhaltung(config: dict) -> int:
     _schritt("6/6 Gegenrechnung + EÜR (Verkaeufe − Gebuehren − Werbung − Wareneinkauf)",
              lambda: cmd_sync(config))
 
-    # ---- Saubere Schlussuebersicht ----
+    print("\n" + _buchhaltung_summary_text(config))
+    return 0
+
+
+def _buchhaltung_summary_text(config: dict) -> str:
+    """Baut die saubere Schlussuebersicht (fuer Konsole UND Telegram)."""
+    from decimal import Decimal as D
+    beginn = _geschaeftsbeginn(config)
+    lex = config.get("integrationen", {}).get("lexware_office", {})
     euer = _lade_json(config.get("pfade", {}).get("euer_snapshot", "data/euer.json")) or {}
     fees = _lade_json(config.get("pfade", {}).get("ebay_fees_export", "data/ebay_fees.json")) or {}
     payouts = _lade_json(config.get("pfade", {}).get("ebay_payouts", "data/ebay_payouts.json")) or []
@@ -1000,37 +1010,33 @@ def cmd_buchhaltung(config: dict) -> int:
         except Exception:  # noqa: BLE001
             return D("0.00")
 
-    payout_summe = sum((g(p.get("amount")) for p in payouts), D("0"))
-    print("\n" + "═" * 52)
-    print("  BUCHHALTUNG — SAUBERE ÜBERSICHT")
-    print(f"  (ab {beginn or 'Geschaeftsbeginn'})")
-    print("═" * 52)
-    print(f"  Umsatz (Verkaeufe)        {g(euer.get('einnahmen_gesamt')):>12} EUR")
-    print(f"  − Wareneinkauf            {g(kat.get('wareneinkauf')):>12} EUR")
-    print(f"  − eBay-Verkaufsgebuehren  {g(kat.get('gebuehren')):>12} EUR")
-    print(f"  − eBay-Werbung/Anzeigen   {g(kat.get('werbung')):>12} EUR")
+    z = []
+    z.append("═" * 44)
+    z.append("  BUCHHALTUNG — SAUBERE ÜBERSICHT")
+    z.append(f"  (ab {beginn or 'Geschaeftsbeginn'})")
+    z.append("═" * 44)
+    z.append(f"  Umsatz (Verkaeufe)        {g(euer.get('einnahmen_gesamt')):>11} EUR")
+    z.append(f"  − Wareneinkauf            {g(kat.get('wareneinkauf')):>11} EUR")
+    z.append(f"  − eBay-Verkaufsgebuehren  {g(kat.get('gebuehren')):>11} EUR")
+    z.append(f"  − eBay-Werbung/Anzeigen   {g(kat.get('werbung')):>11} EUR")
     andere = sum((g(v) for k, v in kat.items()
                   if k not in ("wareneinkauf", "gebuehren", "werbung")), D("0"))
     if andere > 0:
-        print(f"  − sonstige Ausgaben       {andere:>12} EUR")
-    print("  " + "─" * 44)
-    print(f"  = GEWINN                  {g(euer.get('gewinn')):>12} EUR")
-    print("═" * 52)
-    print(f"  Rechnungen gesamt: {len(reg.alle())}  ·  "
-          f"noch nicht in Lexware: {len(reg.offene_lexware())}")
+        z.append(f"  − sonstige Ausgaben       {andere:>11} EUR")
+    z.append("  " + "─" * 40)
+    z.append(f"  = GEWINN                  {g(euer.get('gewinn')):>11} EUR")
+    z.append("═" * 44)
+    z.append(f"  Rechnungen: {len(reg.alle())} · offen fuer Lexware: {len(reg.offene_lexware())}")
     if payouts:
-        print(f"  eBay-Auszahlungen: {len(payouts)} · Summe {payout_summe} EUR")
+        z.append(f"  eBay-Auszahlungen: {len(payouts)} · Summe "
+                 f"{sum((g(p.get('amount')) for p in payouts), D('0'))} EUR")
     if fees.get("werbung"):
-        print(f"  (Gebuehren echt aus eBay; Werbung separat: {fees.get('werbung')} EUR)")
-    else:
-        print("  (Tipp: `ebay-signkey` → centgenaue Gebuehren + Werbung getrennt)")
+        z.append(f"  (Werbung separat: {fees.get('werbung')} EUR)")
     if not lex.get("api_key"):
-        print("  (Lexware-API-Key fehlt → Rechnungen noch nicht uebertragen)")
-    a = _absender(config)
-    if a.vollstaendig():
-        print("  ⚠ Absender unvollstaendig (Steuernummer?) → `rechnung-setup`")
-    print("═" * 52)
-    return 0
+        z.append("  (Lexware-API-Key fehlt → nicht uebertragen)")
+    if _absender(config).vollstaendig():
+        z.append("  ⚠ Absender unvollstaendig (Steuernummer?)")
+    return "\n".join(z)
 
 
 def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
