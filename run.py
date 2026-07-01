@@ -967,12 +967,15 @@ def cmd_buchhaltung(config: dict) -> int:
         if os.path.exists(config.get("pfade", {}).get("ebay_kaeufe_export", "")):
             _schritt("    Einkaufspreise (§25a)", lambda: cmd_ebay_kaeufe(config))
         _schritt("2/6 eBay-Verkaeufe", lambda: cmd_ebay_verkaeufe_api(config, tage))
+        # Signaturschluessel bei Bedarf automatisch anlegen (einmalig), dann Gebuehren.
+        if not os.path.exists(_signing_key_pfad(config)):
+            _schritt("    Signaturschluessel anlegen (einmalig)",
+                     lambda: cmd_ebay_signkey(config))
         if os.path.exists(_signing_key_pfad(config)):
             _schritt("3/6 Echte Gebuehren + Werbung + Auszahlungen",
                      lambda: cmd_ebay_finances(config))
         else:
-            print("3/6 Gebuehren: kein Signaturschluessel — Schaetzung wird genutzt "
-                  "(`python run.py ebay-signkey` fuer centgenaue Werte).")
+            print("3/6 Gebuehren: Schaetzung (Signaturschluessel konnte nicht angelegt werden).")
     else:
         print("⚠ Kein eBay-Token — bitte `ebay-auth` + `ebay-token` zuerst.")
 
