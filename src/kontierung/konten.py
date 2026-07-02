@@ -33,6 +33,7 @@ SKR03: dict[str, str] = {
     "zinsen": "2100",             # Zinsaufwendungen
     "privatentnahme": "1800",     # Privatentnahmen
     "einlage": "1890",            # Privateinlagen
+    "ust_13b_reverse_charge": "1787",   # USt nach §13b (Reverse-Charge) — StB bestaetigen
     "sonstiges": "4900",          # Sonstige betriebliche Aufwendungen
 }
 
@@ -59,6 +60,7 @@ SKR04: dict[str, str] = {
     "zinsen": "7300",             # Zinsaufwendungen
     "privatentnahme": "2100",     # Privatentnahmen
     "einlage": "2180",            # Privateinlagen
+    "ust_13b_reverse_charge": "3837",   # USt nach §13b (Reverse-Charge) — StB bestaetigen
     "sonstiges": "6300",          # Sonstige betriebliche Aufwendungen
 }
 

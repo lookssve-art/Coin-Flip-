@@ -69,8 +69,8 @@ class TestFeeSummary(unittest.TestCase):
         s = EbayFinanceClient.fee_summary(_TX["transactions"])
         # Gebuehren = 15.45 + 6.00 + |−2.50| = 23.95
         self.assertEqual(s["fees_total"], Decimal("23.95"))
-        # Brutto = (104.55+15.45) + (40.00+6.00) = 166.00
-        self.assertEqual(s["sales_gross"], Decimal("166.00"))
+        # Brutto = amount der SALE-Zeilen (Gebuehren sind davon einbehalten): 104.55 + 40.00
+        self.assertEqual(s["sales_gross"], Decimal("144.55"))
         self.assertEqual(s["refunds_total"], Decimal("10.00"))
         self.assertEqual(s["n_sales"], 2)
         # ohne Werbe-Detail: werbung 0, gebuehren = fees_total
@@ -109,10 +109,14 @@ class TestFeeSummary(unittest.TestCase):
 
     def test_to_rows(self):
         rows = EbayFinanceClient.to_rows(_TX["transactions"])
+        # NON_SALE_CHARGE wird uebersprungen -> nur 2 SALE + 1 REFUND = 3 Zeilen.
+        self.assertEqual(len(rows), 3)
         self.assertEqual(rows[0]["gross"], "104.55")
         self.assertEqual(rows[0]["fees"], "15.45")
         self.assertEqual(rows[1]["buyer_country"], "FR")
-        self.assertEqual(rows[3]["refund"], "10.00")
+        self.assertEqual(rows[2]["refund"], "10.00")
+        # keine Phantom-Gebuehrenzeile aus der NON_SALE_CHARGE
+        self.assertFalse(any(r.get("_review") for r in rows))
 
 
 if __name__ == "__main__":

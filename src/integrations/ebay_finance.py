@@ -108,7 +108,9 @@ class EbayFinanceClient:
             elif typ in ("REFUND", "CREDIT"):
                 row.update({"refund": betrag})
             else:
-                row.update({"fees": betrag, "_review": f"unklarer Typ: {typ}"})
+                # PAYOUT/SHIPPING_LABEL/NON_SALE_CHARGE sind KEINE Verkaufszeilen —
+                # nicht als Phantom-Gebuehren in den Verkaufsexport schreiben.
+                continue
             rows.append(row)
         return rows
 
@@ -134,7 +136,9 @@ class EbayFinanceClient:
                 n_sales += 1
                 tf = _dec(t.get("totalFeeAmount"))
                 fees += tf
-                sales_gross += _dec(t.get("amount")) + tf
+                # amount = Brutto-Orderbetrag (was der Kaeufer zahlt); Gebuehren sind
+                # davon einbehalten, NICHT zusaetzlich.
+                sales_gross += _dec(t.get("amount"))
                 werbung += _ad_fees_detail(t)
             elif typ == "SHIPPING_LABEL":
                 versand += abs(_dec(t.get("amount")))

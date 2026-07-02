@@ -55,6 +55,7 @@ def erstelle_bwa(sales, euer, *, zeitraum: str = "laufend", rahmen: str = "skr03
         for kat, betrag in sorted(kosten.items(), key=lambda kv: kv[1], reverse=True)
     }
 
+    sales = list(sales)   # falls Generator: nicht durch Iteration erschoepfen
     monatlich: dict = {}
     for s in sales:
         monat = getattr(s, "datum", None)

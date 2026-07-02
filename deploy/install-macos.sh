@@ -29,6 +29,15 @@ if [ ! -f "$PROJECT_DIR/config.yaml" ]; then
   exit 1
 fi
 
+# Kritisch: PyYAML MUSS fuer genau den python3 da sein, den launchd startet —
+# sonst laedt der Agent still eine leere Config (Bot/eBay/Lexware inaktiv).
+if ! "$PYTHON" -c "import yaml" 2>/dev/null; then
+  echo "⚠ '$PYTHON' hat kein PyYAML — der Autostart liefe sonst OHNE deine config.yaml!"
+  echo "  Fix:  $PYTHON -m pip install pyyaml"
+  echo "  (Danach dieses Skript erneut ausfuehren.)"
+  exit 1
+fi
+
 mkdir -p "$LOG_DIR" "$HOME/Library/LaunchAgents"
 
 # launchd-Plist schreiben (mit echten Pfaden).

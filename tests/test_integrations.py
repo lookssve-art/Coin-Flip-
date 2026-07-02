@@ -82,7 +82,8 @@ class TestEbayFinance(unittest.TestCase):
         self.assertEqual(sales[0].gebuehren, __import__("decimal").Decimal("15.60"))
         self.assertEqual(sales[0].customer_country, "FR")
         self.assertEqual(sales[1].refund, __import__("decimal").Decimal("20.00"))
-        self.assertTrue(any(r.get("_review") for r in rows))  # NON_SALE_CHARGE markiert
+        # NON_SALE_CHARGE ist KEINE Verkaufszeile -> uebersprungen (nur SALE + REFUND).
+        self.assertEqual(len(rows), 2)
 
 
 if __name__ == "__main__":

@@ -98,6 +98,13 @@ class TestGenerator(unittest.TestCase):
         self.assertEqual(p.einzelpreis, Decimal("15.00"))
         self.assertEqual(p.gesamt, Decimal("30.00"))
 
+    def test_summe_stimmt_bei_unteilbarer_menge(self):
+        # brutto/menge nicht cent-glatt (10.00/3) -> Summe MUSS = brutto bleiben,
+        # nicht 9.99 (Rundungsverlust). Wird zur Sammelposition.
+        s = _Sale("ORD-7", date(2026, 6, 10), Decimal("10.00"), menge=Decimal("3"))
+        r = rechnung_aus_verkauf(s, nummer="2026-0007", absender=_absender())
+        self.assertEqual(r.summe, Decimal("10.00"))
+
     def test_artikeltitel_bevorzugt_vor_itemid(self):
         s = _Sale("ORD-1", date(2026, 6, 10), Decimal("3.00"),
                   product_id="227357704604", product_name="Pokemon Charizard Holo")

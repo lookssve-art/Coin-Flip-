@@ -92,10 +92,11 @@ class PayoutReconciler:
     def _beste_bank(self, p: Payout, kandidaten: list[Transaction]) -> Optional[Transaction]:
         bewertet = []
         for t in kandidaten:
-            if p.datum is not None and abs((t.datum - p.datum).days) > self.datum_toleranz_tage:
+            hat_datum = p.datum is not None and t.datum is not None
+            if hat_datum and abs((t.datum - p.datum).days) > self.datum_toleranz_tage:
                 continue
             betrags_diff = abs(t.betrag - p.betrag)
-            tage = abs((t.datum - p.datum).days) if p.datum else 99
+            tage = abs((t.datum - p.datum).days) if hat_datum else 99
             bewertet.append(((betrags_diff, tage), t))
         if not bewertet:
             return None

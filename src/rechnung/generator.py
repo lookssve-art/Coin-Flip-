@@ -37,9 +37,18 @@ def rechnung_aus_verkauf(sale, *, nummer: str, absender: Absender,
     if menge <= 0:
         menge = Decimal("1")
     einzel = Decimal(str(getattr(sale, "einzelpreis", "0") or "0"))
-    if einzel <= 0:
-        einzel = (brutto / menge).quantize(Decimal("0.01")) if menge else brutto
-    pos = Position(bezeichnung=str(bezeichnung), menge=menge, einzelpreis=einzel)
+    if einzel > 0 and (einzel * menge).quantize(Decimal("0.01")) == brutto:
+        # Exakter eBay-Einzelpreis: Menge x Einzel == Verkaufsbetrag.
+        pos = Position(bezeichnung=str(bezeichnung), menge=menge, einzelpreis=einzel)
+    elif menge > 1 and (brutto / menge).quantize(Decimal("0.01")) * menge == brutto:
+        # Aus brutto/menge ableitbar OHNE Rundungsrest.
+        pos = Position(bezeichnung=str(bezeichnung), menge=menge,
+                       einzelpreis=(brutto / menge).quantize(Decimal("0.01")))
+    else:
+        # Nicht sauber teilbar (Rundungsrest) -> eine Sammelposition, damit die
+        # Rechnungssumme IMMER dem tatsaechlichen Verkaufsbetrag entspricht.
+        bez = str(bezeichnung) + (f" ({menge} Stk.)" if menge > 1 else "")
+        pos = Position(bezeichnung=bez, menge=Decimal("1"), einzelpreis=brutto)
     r = Rechnung(
         nummer=nummer,
         datum=getattr(sale, "datum", date.today()),

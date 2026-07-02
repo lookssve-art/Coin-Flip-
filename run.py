@@ -59,6 +59,13 @@ EXAMPLE_CONFIG_PATH = "config.example.yaml"
 def lade_config() -> dict:
     path = CONFIG_PATH if os.path.exists(CONFIG_PATH) else EXAMPLE_CONFIG_PATH
     if yaml is None:
+        # Kritisch: existiert eine echte config.yaml, wuerde der Fallback sie
+        # ignorieren (keine Keys/Tokens) -> Bot laeuft leer. Laut warnen statt still.
+        if os.path.exists(CONFIG_PATH):
+            sys.stderr.write(
+                "\n⚠️  PyYAML fehlt fuer DIESEN Python — deine config.yaml wird IGNORIERT!\n"
+                "    Der Agent liefe ohne deine Keys (Bot/eBay/Lexware inaktiv).\n"
+                f"    Fix:  {sys.executable} -m pip install pyyaml\n\n")
         return _fallback_config()
     with open(path, "r", encoding="utf-8") as fh:
         return yaml.safe_load(fh)
@@ -504,6 +511,7 @@ def cmd_ebay_finances(config: dict, tage: str = "") -> int:
                 "amount": (t.get("amount") or {}).get("value", "0")}
                for t in txs if (t.get("transactionType") or "").upper() == "PAYOUT"]
     payout_pfad = config.get("pfade", {}).get("ebay_payouts", "data/ebay_payouts.json")
+    os.makedirs(os.path.dirname(payout_pfad) or ".", exist_ok=True)
     with open(payout_pfad, "w", encoding="utf-8") as fh:
         json.dump(payouts, fh, ensure_ascii=False, indent=2)
     print(f"Finances-API: {len(txs)} Transaktionen, {s['n_sales']} Verkaeufe "
@@ -1022,8 +1030,11 @@ def _buchhaltung_summary_text(config: dict) -> str:
     z.append(f"  − eBay-Verkaufsgebuehren  {g(kat.get('gebuehren')):>11} EUR")
     z.append(f"  − eBay-Werbung/Anzeigen   {g(kat.get('werbung')):>11} EUR")
     z.append(f"  − Versand/Porto           {g(kat.get('versand')):>11} EUR")
+    if g(kat.get("ust_13b_reverse_charge")) > 0:
+        z.append(f"  − USt §13b (eBay-Geb.)    {g(kat.get('ust_13b_reverse_charge')):>11} EUR")
     andere = sum((g(v) for k, v in kat.items()
-                  if k not in ("wareneinkauf", "gebuehren", "werbung", "versand")), D("0"))
+                  if k not in ("wareneinkauf", "gebuehren", "werbung", "versand",
+                               "ust_13b_reverse_charge")), D("0"))
     if andere > 0:
         z.append(f"  − sonstige Ausgaben       {andere:>11} EUR")
     z.append("  " + "─" * 40)
@@ -1209,6 +1220,31 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
             euer.ausgaben_je_kategorie["versand"] = (
                 euer.ausgaben_je_kategorie.get("versand", Decimal("0")) + versand_ebay)
             euer.hinweise.append(f"eBay-Versandlabels {versand_ebay} EUR als Versand/Porto gebucht.")
+
+    # Erstattungen/Refunds mindern die Einnahmen (§4 Abs. 3 EStG). Reine REFUND-
+    # Zeilen haben brutto=0 und wurden in der EÜR uebersprungen -> hier abziehen.
+    refunds_total = sum((Decimal(str(getattr(s, "refund", 0) or 0)) for s in sales), Decimal("0"))
+    refunds_total = refunds_total.quantize(Decimal("0.01"))
+    if refunds_total > 0:
+        euer.einnahmen_gesamt = (euer.einnahmen_gesamt - refunds_total).quantize(Decimal("0.01"))
+        euer.hinweise.append(f"Erstattungen {refunds_total} EUR von den Einnahmen abgezogen.")
+
+    # § 13b UStG Reverse-Charge: eBay (Luxemburg) stellt die Gebuehren als sonstige
+    # Leistung an SERO -> SERO schuldet 19 % USt darauf ans FA. Gilt AUCH fuer
+    # Kleinunternehmer (§13b Abs. 8). Kein Vorsteuerabzug (§19) -> echte Zusatzkosten.
+    rc_basis = (gebuehren + werbung).quantize(Decimal("0.01"))
+    ust_13b = Decimal("0")
+    if rc_basis > 0:
+        ust_13b = (rc_basis * Decimal("0.19")).quantize(Decimal("0.01"))
+        euer.ausgaben_je_kategorie["ust_13b_reverse_charge"] = (
+            euer.ausgaben_je_kategorie.get("ust_13b_reverse_charge", Decimal("0")) + ust_13b)
+        euer.hinweise.append(
+            f"§13b: {ust_13b} EUR USt auf eBay-Gebuehren ({rc_basis} EUR) ans Finanzamt "
+            "abzufuehren — USt-VA noetig (Kz 46/47), AUCH als Kleinunternehmer; kein "
+            "Vorsteuerabzug. USt-IdNr beim BZSt beantragen. Mit Steuerberater klaeren.")
+        queue.add(f"§13b Reverse-Charge: {ust_13b} EUR USt auf eBay-Gebuehren ans FA "
+                  "(USt-VA Kz 46/47, USt-IdNr noetig)", bezug="ust_13b")
+
     # Gesamtsumme + Gewinn neu berechnen.
     euer.ausgaben_gesamt = sum(euer.ausgaben_je_kategorie.values(), Decimal("0"))
     euer.gewinn = euer.einnahmen_gesamt - euer.ausgaben_gesamt
@@ -1222,8 +1258,11 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     import json
     snapshot = {
         "belege": len(receipts), "banktransaktionen": len(txs), "verkaeufe": len(sales),
-        "differenz_ust": str(journal.differenz_ust),
-        "ustva_zahllast": (None if ku else str(report.zahllast)),
+        # §25a-Margen-USt ist fuer den Kleinunternehmer (§19) nicht anwendbar -> 0.
+        "differenz_ust": ("0.00" if ku else str(journal.differenz_ust)),
+        "ust_13b": str(ust_13b),
+        "refunds": str(refunds_total),
+        "ustva_zahllast": (str(ust_13b) if ku else str(report.zahllast)),
         "euer_gewinn": str(euer.gewinn),
         "euer_einnahmen": str(euer.einnahmen_gesamt),
         "euer_ausgaben": str(euer.ausgaben_gesamt),
@@ -1262,7 +1301,17 @@ def _benachrichtige(config: dict, queue, snapshot: dict) -> None:
     """Proaktive Telegram-Meldung neuer Faelle/Schwellen (guarded, nie crashen)."""
     import json
     tg = config.get("interface", {}).get("telegram", {})
-    if not (tg.get("token") and tg.get("allowed_user_ids")):
+    if not tg.get("token"):
+        return
+    # Empfaenger: Allowlist ODER der per Self-Registration gemerkte Eigentuemer.
+    empfaenger = list(tg.get("allowed_user_ids") or [])
+    if not empfaenger:
+        owner = _lade_json(config.get("pfade", {}).get("telegram_owner", "data/telegram_owner.json"))
+        if isinstance(owner, dict) and owner.get("owner_id"):
+            empfaenger = [owner["owner_id"]]
+        elif isinstance(owner, list):
+            empfaenger = owner
+    if not empfaenger:
         return
     from src.interface import baue_meldungen, TelegramNotifier
     state_pfad = config.get("pfade", {}).get("notify_state", "data/notified.json")
@@ -1270,7 +1319,7 @@ def _benachrichtige(config: dict, queue, snapshot: dict) -> None:
     texte, neuer_state = baue_meldungen(queue.offen(), snapshot, state)
     if texte:
         try:
-            TelegramNotifier(tg["token"], list(tg["allowed_user_ids"])).sende(
+            TelegramNotifier(tg["token"], empfaenger).sende(
                 "📬 SERO-Agent\n\n" + "\n\n".join(texte))
         except Exception as exc:  # noqa: BLE001
             print(f"  (Benachrichtigung fehlgeschlagen: {exc})")
@@ -1589,12 +1638,16 @@ def cmd_serve(config: dict, intervall_stunden: str = "") -> int:
     intervall = float(intervall_stunden or betrieb.get("pipeline_intervall_stunden", 6))
 
     tg = config.get("interface", {}).get("telegram", {})
-    if tg.get("token") and tg.get("allowed_user_ids"):
+    # Nur der Token ist Pflicht: bei leerer Allowlist registriert cmd_telegram den
+    # ersten Schreiber automatisch als Eigentuemer (Owner-Self-Registration).
+    if tg.get("token"):
         t = threading.Thread(target=cmd_telegram, args=(config,), daemon=True)
         t.start()
-        print(f"Telegram-Bot gestartet (Thread). Pipeline-Takt: alle {intervall} h.")
+        wer = ("Allowlist" if tg.get("allowed_user_ids")
+               else "erster Schreiber wird Eigentuemer")
+        print(f"Telegram-Bot gestartet (Thread; {wer}). Pipeline-Takt: alle {intervall} h.")
     else:
-        print(f"Telegram-Bot inaktiv (Token/Allowlist fehlt). Pipeline-Takt: alle {intervall} h.")
+        print(f"Telegram-Bot inaktiv (kein Token). Pipeline-Takt: alle {intervall} h.")
 
     while True:
         try:
