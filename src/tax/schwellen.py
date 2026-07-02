@@ -30,6 +30,7 @@ class SchwellenStatus:
 class SchwellenMonitor:
     ku_vorjahr_grenze: Decimal = Decimal("25000")
     ku_laufend_grenze: Decimal = Decimal("100000")
+    ku_erstjahr_grenze: Decimal = Decimal("25000")   # Gruendungsjahr: 25k-Kappe (§19 UStG 2025)
     oss_grenze: Decimal = Decimal("10000")
     warnung_ab_prozent: Decimal = Decimal("80")
     _warnungen: list[str] = field(default_factory=list)
@@ -50,6 +51,15 @@ class SchwellenMonitor:
         return self._status("KU laufend (§19)", netto_laufend, self.ku_laufend_grenze,
                             "Harte Grenze: der Umsatz, mit dem 100k gerissen wird, ist bereits "
                             "voll regelbesteuert.")
+
+    def kleinunternehmer_erstjahr(self, netto_laufend: Decimal) -> SchwellenStatus:
+        """Gruendungsjahr: bindende Grenze ist 25.000 EUR (kein Vorjahr vorhanden).
+
+        Bei Ueberschreitung entfaellt der KU-Status ab dem gerissen Umsatz —
+        ab dann Regelbesteuerung."""
+        return self._status("KU Gruendungsjahr (§19)", netto_laufend, self.ku_erstjahr_grenze,
+                            "Gruendungsjahr-Kappe 25.000 EUR: bei Ueberschreitung entfaellt "
+                            "der Kleinunternehmer-Status ab diesem Umsatz -> Regelbesteuerung.")
 
     def oss_fernverkauf(self, netto_eu_b2c_ohne_25a: Decimal) -> SchwellenStatus:
         return self._status("OSS-Fernverkauf", netto_eu_b2c_ohne_25a, self.oss_grenze,

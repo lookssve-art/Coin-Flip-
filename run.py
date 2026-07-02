@@ -1129,9 +1129,17 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
         ku_vorjahr_grenze=Decimal(str(sch.get("kleinunternehmer_vorjahr_eur", 25000))),
         ku_laufend_grenze=Decimal(str(sch.get("kleinunternehmer_laufend_eur", 100000))),
         oss_grenze=Decimal(str(sch.get("oss_fernverkauf_eur", 10000))),
+        ku_erstjahr_grenze=Decimal(str(sch.get("kleinunternehmer_erstjahr_eur", 25000))),
         warnung_ab_prozent=Decimal(str(sch.get("warnung_ab_prozent", 80))),
     )
-    ku_status = mon.kleinunternehmer_laufend(journal.umsatz_brutto)
+    # Gruendungsjahr (Gruendung im laufenden Jahr, kein Vorjahresumsatz): bindende
+    # KU-Grenze ist 25.000 EUR — nicht die 100.000-EUR-Grenze etablierter Betriebe.
+    from datetime import date as _date
+    ist_erstjahr = bool(beginn and beginn.year == _date.today().year)
+    if ist_erstjahr:
+        ku_status = mon.kleinunternehmer_erstjahr(journal.umsatz_brutto)
+    else:
+        ku_status = mon.kleinunternehmer_laufend(journal.umsatz_brutto)
     oss_status = mon.oss_fernverkauf(journal.oss_netto_eu_b2c)
     for st in (ku_status, oss_status):
         flag = "UEBERSCHRITTEN" if st.ueberschritten else ("WARNUNG" if st.warnung else "ok")
