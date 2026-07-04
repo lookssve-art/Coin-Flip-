@@ -32,6 +32,15 @@ def pruefe_rechnung(r, *, kleinunternehmer: bool = True) -> list[Befund]:
     if not a or not (getattr(a, "steuernummer", "") or getattr(a, "ust_id", "")):
         b.append(Befund("absender.steuernummer", Schwere.FEHLER,
                         "Steuernummer ODER USt-IdNr fehlt (§14 Abs. 4 Nr. 2)."))
+    else:
+        # 11 Ziffern am Stueck = persoenliche Steuer-ID (IdNr) — nicht §14-tauglich.
+        import re
+        stnr = str(getattr(a, "steuernummer", "") or "").replace(" ", "")
+        if re.fullmatch(r"\d{11}", stnr):
+            b.append(Befund("absender.steuernummer", Schwere.FEHLER,
+                            "Das sieht wie die persoenliche Steuer-ID aus (11 Ziffern) — "
+                            "auf Rechnungen gehoert die FA-Steuernummer (1xx/xxx/xxxxx) "
+                            "oder USt-IdNr (§14 Abs. 4 Nr. 2)."))
 
     # --- Rechnungsnummer + Daten ---
     if not getattr(r, "nummer", ""):

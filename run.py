@@ -379,16 +379,26 @@ def cmd_rechnung_setup(config: dict, name: str = "", strasse: str = "", plz: str
     if not os.path.exists(path):
         print("config.yaml nicht gefunden (im Projektordner ausfuehren).")
         return 2
+    import re
+    # Experten-Wächter: 11 Ziffern am Stueck = persoenliche Steuer-ID (IdNr) —
+    # die gehoert NICHT auf Rechnungen (§14 verlangt FA-Steuernummer/USt-IdNr).
+    if steuernummer and steuernummer != "-" and re.fullmatch(r"\d{11}", steuernummer.replace(" ", "")):
+        print("⛔ Das ist deine persoenliche Steuer-IDENTIFIKATIONSnummer (11 Ziffern) —\n"
+              "   die gehoert NICHT auf Rechnungen (§14 UStG verlangt die Steuernummer\n"
+              "   vom Finanzamt, Format z. B. 1xx/xxx/xxxxx, oder eine USt-IdNr DE...).\n"
+              "   Die Gewerbe-Steuernummer kommt vom FINANZAMT nach dem 'Fragebogen zur\n"
+              "   steuerlichen Erfassung' (ELSTER) — nicht mit dem Gewerbeschein.\n"
+              "   -> Feld bleibt leer; der Agent haelt Rechnungen solange sicher zurueck.")
+        steuernummer = ""
     with open(path, "r", encoding="utf-8") as fh:
         txt = fh.read()
-    import re
     if re.search(r"(?m)^rechnung:", txt):
-        # Block existiert -> nur die uebergebenen Felder aktualisieren.
+        # Block existiert -> nur die uebergebenen Felder aktualisieren ("-" = leeren).
         felder = {"name": name, "strasse": strasse, "plz": plz, "ort": ort,
                   "steuernummer": steuernummer, "iban": iban, "ust_id": ust_id}
         for feld, wert in felder.items():
             if wert:
-                txt = _absender_feld_setzen(txt, feld, wert)
+                txt = _absender_feld_setzen(txt, feld, "" if wert == "-" else wert)
         aktion = "absender-Felder aktualisiert"
     else:
         if not txt.endswith("\n"):
@@ -823,8 +833,9 @@ def cmd_rechnungen(config: dict) -> int:
         r = rechnung_aus_verkauf(s, nummer=nummer, absender=absender,
                                  kleinunternehmer=ku, hinweis=hinweis)
         basis = os.path.join(verzeichnis, nummer.replace("/", "-"))
+        logo = rc.get("logo", "assets/logo.jpg")
         with open(basis + ".html", "w", encoding="utf-8") as fh:
-            fh.write(render_html(r))
+            fh.write(render_html(r, logo_pfad=logo))
         with open(basis + ".txt", "w", encoding="utf-8") as fh:
             fh.write(render_text(r))
         with open(basis + ".json", "w", encoding="utf-8") as fh:

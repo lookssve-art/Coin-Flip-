@@ -123,6 +123,23 @@ class TestGenerator(unittest.TestCase):
         self.assertIn("200.00", h)
         self.assertIn("§ 19 UStG", h)
 
+    def test_logo_wird_eingebettet(self):
+        import tempfile
+        s = _Sale("ORD-1", date(2026, 6, 10), Decimal("5.00"))
+        r = rechnung_aus_verkauf(s, nummer="2026-0001", absender=_absender())
+        fd, p = tempfile.mkstemp(suffix=".png")
+        os.write(fd, b"\x89PNG\r\n\x1a\nfakepng")
+        os.close(fd)
+        try:
+            h = render_html(r, logo_pfad=p)
+        finally:
+            os.remove(p)
+        self.assertIn("data:image/png;base64,", h)
+        self.assertIn('class="logo"', h)
+        # ohne Logo-Datei: kein kaputtes img-Tag
+        h2 = render_html(r, logo_pfad="/nope/fehlt.png")
+        self.assertNotIn("<img", h2)
+
     def test_html_escaped(self):
         s = _Sale("ORD-1", date(2026, 6, 10), Decimal("5.00"),
                   product_id="<script>alert(1)</script>")

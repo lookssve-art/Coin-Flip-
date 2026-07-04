@@ -82,6 +82,7 @@ rechnung:
   nummer_start: 1
   kleinunternehmer_hinweis: "Gemäß § 19 UStG wird keine Umsatzsteuer berechnet (Kleinunternehmer)."
   verzeichnis: "belege/rechnungen/"      # Ablage HTML/Text/JSON/PDF (gitignored)
+  logo: "assets/logo.jpg"                # Firmenlogo, mittig oben auf der Rechnung
   register: "data/rechnungen_register.json"     # idempotent: 1 Rechnung je Bestellung
   nummernkreis: "data/rechnungsnummern.json"    # fortlaufender Zaehler (§14 UStG)
   lexware:

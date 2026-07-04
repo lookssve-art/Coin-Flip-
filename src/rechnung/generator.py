@@ -96,10 +96,28 @@ def render_text(r: Rechnung) -> str:
     return "\n".join(z for z in zeilen if z is not None)
 
 
-def render_html(r: Rechnung) -> str:
+def _logo_data_uri(pfad: str) -> str:
+    """Bettet das Logo als data-URI ein (Rechnung bleibt self-contained/GoBD)."""
+    if not pfad:
+        return ""
+    import base64
+    import os
+    if not os.path.exists(pfad):
+        return ""
+    endung = os.path.splitext(pfad)[1].lower()
+    mime = {"jpg": "image/jpeg", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".png": "image/png", ".svg": "image/svg+xml"}.get(endung, "image/png")
+    with open(pfad, "rb") as fh:
+        return f"data:{mime};base64," + base64.b64encode(fh.read()).decode("ascii")
+
+
+def render_html(r: Rechnung, *, logo_pfad: str = "") -> str:
     """Druckbare HTML-Rechnung (kann im Browser als PDF gespeichert werden)."""
     a, e = r.absender, r.empfaenger
     esc = html.escape
+    logo_uri = _logo_data_uri(logo_pfad)
+    logo_html = (f'<div class="logo"><img src="{logo_uri}" alt="Logo"></div>'
+                 if logo_uri else "")
 
     pos_rows = "".join(
         f"<tr><td>{i}</td><td>{esc(p.bezeichnung)}</td>"
@@ -132,7 +150,10 @@ def render_html(r: Rechnung) -> str:
  tfoot td{{font-weight:bold;border-top:2px solid #333}}
  .hinweis{{background:#f6f6f6;padding:8px 10px;border-left:3px solid #888}}
  .meta{{color:#444}}
+ .logo{{text-align:center;margin-bottom:1em}}
+ .logo img{{max-width:160px;max-height:160px}}
 </style></head><body>
+{logo_html}
 <div class="absender">{esc(a.name)} · {esc(a.strasse)} · {esc(a.plz)} {esc(a.ort)}</div>
 <div style="margin-top:1.5em">{empf_anschrift}</div>
 <h1>Rechnung {esc(r.nummer)}</h1>

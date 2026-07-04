@@ -61,6 +61,20 @@ class TestRechnungPruefung(unittest.TestCase):
         ok, _ = versandfertig(r, kleinunternehmer=True)
         self.assertTrue(ok)  # bleibt konsistent (Property rechnet nach)
 
+    def test_steuer_id_statt_steuernummer_blockt(self):
+        # 11-stellige persoenliche Steuer-ID ist NICHT §14-tauglich.
+        r = _vollstaendig()
+        r.absender.steuernummer = "12345678901"   # Beispiel-IdNr (11 Ziffern)
+        ok, befunde = versandfertig(r, kleinunternehmer=True)
+        self.assertFalse(ok)
+        self.assertTrue(any("Steuer-ID" in x.nachricht for x in befunde))
+
+    def test_echte_fa_steuernummer_ok(self):
+        r = _vollstaendig()
+        r.absender.steuernummer = "143/123/45678"
+        ok, _ = versandfertig(r, kleinunternehmer=True)
+        self.assertTrue(ok)
+
     def test_fehlende_nummer_blockt(self):
         r = _vollstaendig()
         r.nummer = ""
