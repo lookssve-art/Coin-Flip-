@@ -78,6 +78,11 @@ class LexwareInvoiceClient:
     base_url: str = "https://api.lexware.io/v1"
     _poster: Callable[..., dict] = field(default=http_json, repr=False)
     _bytes: Callable[..., bytes] = field(default=http_bytes, repr=False)
+    _uploader: Callable[..., dict] = field(default=None, repr=False)
+
+    def __post_init__(self):
+        if self._uploader is None:
+            self._uploader = _default_uploader
 
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self.api_key}",
@@ -101,3 +106,40 @@ class LexwareInvoiceClient:
         if not file_id:
             raise RuntimeError("Lexware lieferte keine documentFileId.")
         return self._bytes(f"{base}/files/{file_id}", headers=self._headers())
+
+    def datei_hochladen(self, dateiname: str, inhalt: bytes,
+                        mimetype: str = "application/pdf") -> str:
+        """Laedt eine Beleg-Datei (z. B. eBay-Bestell-Dokument) nach /files hoch.
+
+        EXPERIMENTELL: Endpunkt/Feldname gegen developers.lexware.io verifizieren.
+        Gibt die Lexware-File-ID zurueck (zum Verknuepfen mit der Buchung)."""
+        body, ctype = _multipart_body("file", dateiname, inhalt, mimetype)
+        headers = {"Authorization": f"Bearer {self.api_key}", "Accept": "application/json",
+                   "Content-Type": ctype}
+        antwort = self._uploader(f"{self.base_url.rstrip('/')}/files", body, headers)
+        return (antwort or {}).get("id", "")
+
+
+def _multipart_body(feldname: str, dateiname: str, inhalt: bytes,
+                    mimetype: str) -> tuple[bytes, str]:
+    """Baut einen multipart/form-data-Body (rein/testbar)."""
+    grenze = "----seroagent7c1f9b2e4d"
+    vor = (f"--{grenze}\r\n"
+           f'Content-Disposition: form-data; name="{feldname}"; filename="{dateiname}"\r\n'
+           f"Content-Type: {mimetype}\r\n\r\n").encode("utf-8")
+    nach = f"\r\n--{grenze}--\r\n".encode("utf-8")
+    return vor + inhalt + nach, f"multipart/form-data; boundary={grenze}"
+
+
+def _default_uploader(url: str, body: bytes, headers: dict) -> dict:
+    import json as _json
+    import urllib.error
+    import urllib.request
+    from ..util.http import _ssl_context, HttpError
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=30, context=_ssl_context()) as resp:
+            roh = resp.read().decode("utf-8")
+            return _json.loads(roh) if roh else {}
+    except urllib.error.HTTPError as exc:
+        raise HttpError(exc.code, exc.read().decode("utf-8", errors="replace")) from exc

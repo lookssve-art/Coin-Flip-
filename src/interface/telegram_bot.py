@@ -34,6 +34,7 @@ _HELP = (
     "/sync    — jetzt aktuelle Zahlen ziehen (eBay) + neu rechnen\n"
     "/rechnungen — Rechnungen aus eBay-Verkaeufen erzeugen + nach Lexware\n"
     "/bwa     — Monatsabschluss: Umsatz, Rohertrag, Kosten, Gewinn, Kennzahlen\n"
+    "/bestand — Warenbuch: Kaeufe + Lexware-Belege + Verkaeufe, was noch im Bestand ist\n"
     "/status  — Kurzueberblick (offene Faelle)\n"
     "/report  — Dashboard: Umsaetze, USt, Schwellen aus dem letzten Sync\n"
     "/schwellen — § 19- und OSS-Schwellen-Status\n"
@@ -67,6 +68,7 @@ class TelegramBot:
     rechnungen_callback: Optional[Callable[[], str]] = None  # /rechnungen: erzeugt + pusht
     bwa_callback: Optional[Callable[[], str]] = None          # /bwa: Monatsabschluss
     buchhaltung_callback: Optional[Callable[[], str]] = None  # /buchhaltung: ALLES
+    bestand_callback: Optional[Callable[[], str]] = None      # /bestand: Warenbuch
     _offset: int = 0
 
     def __post_init__(self):
@@ -174,6 +176,13 @@ class TelegramBot:
                 return "📊 " + self.bwa_callback()
             except Exception as exc:  # noqa: BLE001
                 return f"BWA fehlgeschlagen: {exc}"
+        if cmd in ("/bestand", "/warenbuch"):
+            if self.bestand_callback is None:
+                return "Bestand hier nicht aktiv. Starte mit `python run.py telegram`."
+            try:
+                return self.bestand_callback()
+            except Exception as exc:  # noqa: BLE001
+                return f"Bestand fehlgeschlagen: {exc}"
         return "Unbekannter Befehl. /help fuer die Liste."
 
     def _cmd_buchhaltung(self, chat_id: int) -> str:

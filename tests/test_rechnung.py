@@ -178,6 +178,21 @@ class TestLexwareMapping(unittest.TestCase):
         self.assertTrue(cap["url"].endswith("/invoices?finalize=true"))
         self.assertEqual(cap["method"], "POST")
 
+    def test_datei_hochladen_multipart(self):
+        cap = {}
+        def fake_upload(url, body, headers):
+            cap["url"] = url
+            cap["body"] = body
+            cap["ctype"] = headers.get("Content-Type", "")
+            return {"id": "file-77"}
+        client = LexwareInvoiceClient(api_key="KEY", _uploader=fake_upload)
+        fid = client.datei_hochladen("beleg.json", b'{"a":1}', "application/json")
+        self.assertEqual(fid, "file-77")
+        self.assertTrue(cap["url"].endswith("/files"))
+        self.assertIn("multipart/form-data; boundary=", cap["ctype"])
+        self.assertIn(b'filename="beleg.json"', cap["body"])
+        self.assertIn(b'{"a":1}', cap["body"])
+
     def test_pdf_zweistufig(self):
         calls = []
         def fake_json(url, headers=None, **kw):

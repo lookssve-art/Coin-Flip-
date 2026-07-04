@@ -23,6 +23,8 @@ Verwendung:
     python run.py rechnungen-push      # Erzeugte Rechnungen nach Lexware Office uebertragen
     python run.py billbee-sync [tage]  # Bestellungen aus Billbee ziehen (Multichannel)
     python run.py buchhaltung          # ALLES: eBay/Billbee->Rechnungen->Lexware->Gegenrechnung
+    python run.py lexware-belege       # In Lexware hinterlegte Belege (Wareneinkauf) auslesen
+    python run.py bestand              # Warenbuch/Bestand: Kaeufe + Belege + Verkaeufe
     python run.py bwa                  # BWA/Monatsabschluss (Rohertrag, Kosten, Kennzahlen)
     python run.py pruefung             # Plausibilitaet (IBAN/USt-IdNr/Dubletten)
     python run.py kann                 # Funktionsumfang anzeigen (Master-Prompt-Abgleich)
@@ -173,6 +175,12 @@ def cmd_telegram_check(config: dict) -> int:
     return 0
 
 
+def _bestand_text(config: dict) -> str:
+    from src.warenbuch import erstelle_warenbuch, render_bestand_text
+    w = erstelle_warenbuch(_warenbuch_kaeufe(config), _ebay_verkaeufe(config))
+    return render_bestand_text(w)
+
+
 def _bwa_text(config: dict) -> str:
     """BWA als Text fuer den Bot (nutzt den letzten EÜR-Snapshot)."""
     from src.abschluss import erstelle_bwa, render_bwa_text
@@ -237,6 +245,7 @@ def cmd_telegram(config: dict) -> int:
         bwa_callback=lambda: _bwa_text(config),
         buchhaltung_callback=lambda: (cmd_buchhaltung(config),
                                       _buchhaltung_summary_text(config))[1],
+        bestand_callback=lambda: _bestand_text(config),
     )
     bot.run(poll_timeout=int(tg.get("poll_timeout", 30)))
     return 0
@@ -877,6 +886,16 @@ def cmd_rechnungen_push(config: dict) -> int:
                     extra["pdf"] = pdf_pfad
                 except Exception as exc:  # noqa: BLE001 - PDF optional
                     print(f"  (PDF fuer {nummer} nicht geladen: {exc})")
+            # Optional: eBay-Bestell-Dokument als Beleg an die Buchung anhaengen.
+            if rc.get("lexware", {}).get("beleg_anhaengen") and lex_id:
+                try:
+                    import json as _json
+                    doku = _json.dumps(r.als_dict(), ensure_ascii=False, indent=2).encode("utf-8")
+                    file_id = client.datei_hochladen(
+                        f"eBay-Bestellung-{nummer}.json", doku, "application/json")
+                    extra["beleg_file_id"] = file_id
+                except Exception as exc:  # noqa: BLE001 - experimentell
+                    print(f"  (Beleg-Anhang fuer {nummer} nicht moeglich: {exc})")
             reg.merke(bid, nummer, **extra)
             erfolg += 1
         except Exception as exc:  # noqa: BLE001
@@ -965,6 +984,9 @@ _FUNKTIONSUEBERSICHT = """SERO Agent — Funktionsumfang (gegen Master-Prompt):
   ✅ Automatische Kontierung SKR03/SKR04                -> (in sync/bwa)
   ✅ Plausibilitaet: IBAN/USt-IdNr/Mathematik/Dubletten -> pruefung
   ✅ BWA/Monatsabschluss (Rohertrag, Kennzahlen)        -> bwa
+  ✅ Warenbuch/Bestand (Kaeufe+Lexware-Belege+Verkaeufe) -> bestand
+  ✅ In Lexware hinterlegte Belege auslesen             -> lexware-belege
+  ✅ Rechnungs-Selbstpruefung vor Versand (§14/§33)     -> (in rechnungen-push)
   ✅ Reconciliation Auszahlung<->Bank, Belege<->Bank    -> sync (+ Konto-CSV)
   ✅ Schwellen-Monitoring (§19, OSS 10k)                -> sync
   ✅ OCR-Beleg-Pipeline (Kategorie/Vorsteuer)           -> sync (+ Beleg-Inbox)
@@ -980,6 +1002,60 @@ _FUNKTIONSUEBERSICHT = """SERO Agent — Funktionsumfang (gegen Master-Prompt):
 def cmd_kann(config: dict) -> int:
     """Zeigt den Funktionsumfang (was automatisiert ist, was noch ansteht)."""
     print(_FUNKTIONSUEBERSICHT)
+    return 0
+
+
+def cmd_lexware_belege(config: dict, tage: str = "") -> int:
+    """Liest die in Lexware hinterlegten Belege (Wareneinkauf/Ausgaben) und
+    speichert sie nach data/lexware_belege.json (fuer Warenbuch/Bestand)."""
+    import json
+    from datetime import date, timedelta
+    from src.integrations import LexwareVoucherReader
+    lex = config.get("integrationen", {}).get("lexware_office", {})
+    if not lex.get("api_key"):
+        print("Kein Lexware-API-Key (integrationen.lexware_office.api_key).")
+        return 2
+    beginn = _geschaeftsbeginn(config)
+    von = ((date.today() - timedelta(days=int(tage))).isoformat() if tage
+           else (_einkauf_ab(config) or beginn or date(date.today().year, 1, 1)).isoformat())
+    try:
+        reader = LexwareVoucherReader(api_key=lex["api_key"],
+                                      base_url=lex.get("base_url", "https://api.lexware.io/v1"))
+        belege = reader.alle_belege(von=von)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Lexware-Belege lesen fehlgeschlagen: {exc}")
+        return 1
+    pfad = config.get("pfade", {}).get("lexware_belege", "data/lexware_belege.json")
+    os.makedirs(os.path.dirname(pfad) or ".", exist_ok=True)
+    with open(pfad, "w", encoding="utf-8") as fh:
+        json.dump(belege, fh, ensure_ascii=False, indent=2)
+    summe = sum((Decimal(b.get("betrag", "0")) for b in belege), Decimal("0"))
+    print(f"Lexware: {len(belege)} Belege (ab {von}) -> {pfad}. Summe {summe} EUR.")
+    return 0
+
+
+def _warenbuch_kaeufe(config: dict) -> list:
+    """Kaeufe fuer das Warenbuch: eBay-Kaufhistorie + in Lexware hinterlegte Belege."""
+    kaeufe = []
+    for r in (_lade_json(config.get("pfade", {}).get("ebay_kaeufe_export", "")) or []):
+        kaeufe.append({"product_id": r.get("product_id"), "title": r.get("title"),
+                       "preis": r.get("price") or r.get("preis") or "0", "quelle": "ebay"})
+    for b in (_lade_json(config.get("pfade", {}).get("lexware_belege", "")) or []):
+        kaeufe.append({"product_id": "", "title": b.get("kontakt") or "Lexware-Beleg",
+                       "preis": b.get("betrag", "0"), "quelle": "lexware"})
+    return kaeufe
+
+
+def cmd_bestand(config: dict) -> int:
+    """Warenbuch/Bestand: eBay-Kaeufe + Lexware-Belege + Verkaeufe zusammengefuehrt."""
+    from src.warenbuch import erstelle_warenbuch, render_bestand_text, schreibe_warenbuch_json
+    kaeufe = _warenbuch_kaeufe(config)
+    verkaeufe = _ebay_verkaeufe(config)
+    w = erstelle_warenbuch(kaeufe, verkaeufe)
+    pfad = config.get("pfade", {}).get("warenbuch", "data/warenbuch.json")
+    schreibe_warenbuch_json(pfad, w)
+    print(render_bestand_text(w))
+    print(f"\n(Details: {pfad})")
     return 0
 
 
@@ -1067,8 +1143,12 @@ def cmd_buchhaltung(config: dict) -> int:
         _schritt("5/6 Rechnungen -> Lexware (Entwurf)", lambda: cmd_rechnungen_push(config))
     else:
         print("5/6 Lexware-Push uebersprungen (kein API-Key in config.yaml).")
+    # In Lexware hinterlegte Belege (Wareneinkauf) mitlesen -> Bestand.
+    if lex.get("api_key"):
+        _schritt("    Lexware-Belege lesen (Bestand)", lambda: cmd_lexware_belege(config))
     _schritt("6/6 Gegenrechnung + EÜR (Verkaeufe − Gebuehren − Werbung − Wareneinkauf)",
              lambda: cmd_sync(config))
+    _schritt("    Warenbuch/Bestand aktualisieren", lambda: cmd_bestand(config))
 
     print("\n" + _buchhaltung_summary_text(config))
     return 0
@@ -1755,6 +1835,8 @@ COMMANDS = {
     "billbee-sync": cmd_billbee_sync,
     "buchhaltung": cmd_buchhaltung,
     "bwa": cmd_bwa,
+    "bestand": cmd_bestand,
+    "lexware-belege": cmd_lexware_belege,
     "pruefung": cmd_pruefung,
     "kann": cmd_kann,
     "lexware-ping": cmd_lexware_ping,
