@@ -45,6 +45,30 @@ class TestWarenbuch(unittest.TestCase):
         self.assertIn("Warenbuch", t)
         self.assertIn("Bestand", t)
 
+    def test_komma_preis_crasht_nicht(self):
+        # Website-Export liefert oft deutsche Kommazahlen.
+        w = erstelle_warenbuch([{"title": "X", "preis": "12,34", "quelle": "ebay"}], [])
+        self.assertEqual(w.einkauf_gesamt, Decimal("12.34"))
+
+    def test_menge_zaehlt_im_verkauf(self):
+        @dataclass
+        class _S:
+            product_id: str
+            product_name: str
+            brutto: Decimal
+            menge: Decimal
+        kaeufe = [{"product_id": "B-1", "title": "Booster", "preis": "10.00",
+                   "quelle": "ebay"} for _ in range(3)]
+        w = erstelle_warenbuch(kaeufe, [_S("B-1", "Booster", Decimal("45.00"), Decimal("3"))])
+        self.assertEqual(w.verkauf_anzahl, 3)
+        self.assertEqual(w.bestand_anzahl, 0)   # 3 gekauft, 3 verkauft
+
+    def test_refund_zeile_ist_kein_verkauf(self):
+        refund = _Sale("", "", Decimal("0"))
+        w = erstelle_warenbuch([{"title": "X", "preis": "10", "quelle": "ebay"}], [refund])
+        self.assertEqual(w.verkauf_anzahl, 0)
+        self.assertEqual(w.bestand_anzahl, 1)
+
 
 class TestLexwareVoucherParse(unittest.TestCase):
     def test_parse(self):

@@ -43,7 +43,13 @@ Der Bot läuft ab jetzt automatisch (auch nach Neustart). Logs:
 `log/serve.out.log` / `log/serve.err.log`.
 
 ## 6. Über Telegram testen
-Dem Bot **„hi"** schreiben → du wirst als Eigentümer freigeschaltet. Dann:
+**Neu (Sicherheit):** Beim ersten Start erzeugt der Agent eine **Setup-PIN** —
+sie steht in der Konsole bzw. in `data/telegram_setup_pin.txt`:
+```bash
+cat data/telegram_setup_pin.txt
+```
+Dem Bot **diese PIN** als erste Nachricht schicken → du wirst als Eigentümer
+freigeschaltet (Fremde ohne PIN werden abgewiesen). Dann:
 ```
 /uebersicht      → muss antworten
 /buchhaltung     → kompletter Lauf, ~1–2 Min, dann Schluss-Übersicht mit echten Zahlen

@@ -9,8 +9,18 @@ from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_HALF_UP
 
 
+def _dec(v) -> Decimal:
+    """Tolerantes Decimal-Parsing (Komma, None, Muell) — wie die Nachbar-Module."""
+    if v is None:
+        return Decimal("0")
+    try:
+        return Decimal(str(v).replace(",", ".").strip() or "0")
+    except Exception:  # noqa: BLE001
+        return Decimal("0")
+
+
 def _q(x) -> Decimal:
-    return Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return _dec(x).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def _key(text: str) -> str:
@@ -76,7 +86,7 @@ def erstelle_warenbuch(kaeufe, verkaeufe) -> Warenbuch:
     ek_n = 0
     for k in kaeufe:
         bez = str(k.get("title") or k.get("product_id") or k.get("kontakt") or "unbekannt")
-        preis = Decimal(str(k.get("preis") or k.get("betrag") or "0"))
+        preis = _dec(k.get("preis") or k.get("betrag"))
         g = hol(_key(k.get("product_id") or bez), bez)
         g.einkauf_anzahl += 1
         g.einkauf_summe += preis
@@ -87,18 +97,24 @@ def erstelle_warenbuch(kaeufe, verkaeufe) -> Warenbuch:
     vk_ges = Decimal("0")
     vk_n = 0
     for s in verkaeufe:
+        brutto = _dec(getattr(s, "brutto", None)
+                      if not isinstance(s, dict) else s.get("gross"))
+        if brutto <= 0:
+            continue   # reine Refund-/Nullzeilen sind keine Verkaeufe
         bez = str(getattr(s, "product_name", "") or getattr(s, "product_id", "")
                   or (s.get("title") if isinstance(s, dict) else "") or "unbekannt")
-        brutto = Decimal(str(getattr(s, "brutto", None)
-                             if not isinstance(s, dict) else s.get("gross", "0")))
         pid = (getattr(s, "product_id", None) if not isinstance(s, dict)
                else s.get("product_id"))
+        # echte Stueckzahl (eBay QuantityPurchased) statt pauschal 1
+        menge_raw = (getattr(s, "menge", None) if not isinstance(s, dict)
+                     else s.get("quantity"))
+        menge = int(_dec(menge_raw)) if _dec(menge_raw) > 0 else 1
         g = hol(_key(pid or bez), bez)
-        g.verkauf_anzahl += 1
+        g.verkauf_anzahl += menge
         g.verkauf_summe += brutto
         g.quellen.add("verkauf")
         vk_ges += brutto
-        vk_n += 1
+        vk_n += menge
 
     for g in gruppen.values():
         g.einkauf_summe = _q(g.einkauf_summe)

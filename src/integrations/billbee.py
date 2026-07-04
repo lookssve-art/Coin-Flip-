@@ -136,7 +136,7 @@ class BillbeeClient:
             if not rows:
                 break
             alle.extend(rows)
-            paging = raw.get("Paging") or {}
+            paging = (raw.get("Paging") or {}) if isinstance(raw, dict) else {}
             if page >= int(paging.get("TotalPages", page) or page):
                 break
         return alle

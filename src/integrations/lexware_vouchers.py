@@ -78,7 +78,8 @@ class LexwareVoucherReader:
             if not belege:
                 break
             alle.extend(belege)
-            total_pages = int(raw.get("totalPages", page + 1) or (page + 1))
+            total_pages = (int(raw.get("totalPages", page + 1) or (page + 1))
+                           if isinstance(raw, dict) else page + 1)
             if page + 1 >= total_pages:
                 break
         return alle

@@ -71,7 +71,11 @@ def lade_config() -> dict:
                 f"    Fix:  {sys.executable} -m pip install pyyaml\n\n")
         return _fallback_config()
     with open(path, "r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+        daten = yaml.safe_load(fh)
+    if not isinstance(daten, dict):
+        sys.stderr.write(f"⚠️  {path} ist leer/ungueltig — nutze Beispiel-Defaults.\n")
+        return _fallback_config()
+    return daten
 
 
 def _fallback_config() -> dict:
@@ -223,10 +227,23 @@ def cmd_telegram(config: dict) -> int:
         return 2
     allowed = set(tg.get("allowed_user_ids") or [])
     owner_store = config.get("pfade", {}).get("telegram_owner", "data/telegram_owner.json")
+    setup_pin = ""
     if not allowed and not os.path.exists(owner_store):
+        # Setup-PIN gegen Fremd-Uebernahme: nur wer sie sendet, wird Eigentuemer.
+        import secrets
+        pin_pfad = config.get("pfade", {}).get("telegram_setup_pin",
+                                               "data/telegram_setup_pin.txt")
+        if os.path.exists(pin_pfad):
+            with open(pin_pfad, "r", encoding="utf-8") as fh:
+                setup_pin = fh.read().strip()
+        if not setup_pin:
+            setup_pin = str(secrets.randbelow(900000) + 100000)
+            os.makedirs(os.path.dirname(pin_pfad) or ".", exist_ok=True)
+            with open(pin_pfad, "w", encoding="utf-8") as fh:
+                fh.write(setup_pin)
         print("Erst-Einrichtung: noch niemand freigeschaltet.\n"
-              "Schreibe dem Bot jetzt eine Nachricht — der ERSTE Schreiber wird automatisch\n"
-              "als Eigentuemer freigeschaltet (danach sind nur noch DU berechtigt).")
+              f"➡ Sende dem Bot als erste Nachricht diese Setup-PIN: {setup_pin}\n"
+              "  (Wer die PIN sendet, wird Eigentuemer — danach ist nur noch er berechtigt.)")
     from src.wissen import Duden
     llm = config.get("integrationen", {}).get("llm", {})
     bot = TelegramBot(
@@ -246,6 +263,7 @@ def cmd_telegram(config: dict) -> int:
         buchhaltung_callback=lambda: (cmd_buchhaltung(config),
                                       _buchhaltung_summary_text(config))[1],
         bestand_callback=lambda: _bestand_text(config),
+        setup_pin=setup_pin,
     )
     bot.run(poll_timeout=int(tg.get("poll_timeout", 30)))
     return 0
@@ -797,6 +815,10 @@ def cmd_rechnungen(config: dict) -> int:
     for s in sorted(sales, key=lambda x: (x.datum, str(x.id))):
         if reg.hat(str(s.id)):
             continue
+        # Refund-/Nullzeilen sind KEINE Verkaeufe: keine Rechnung, und vor allem
+        # keine verbrauchte fortlaufende Nummer (§14 Abs. 4 Nr. 4).
+        if Decimal(str(s.brutto)) <= 0:
+            continue
         nummer = nk.naechste(s.datum.year)
         r = rechnung_aus_verkauf(s, nummer=nummer, absender=absender,
                                  kleinunternehmer=ku, hinweis=hinweis)
@@ -859,8 +881,12 @@ def cmd_rechnungen_push(config: dict) -> int:
         nummer = eintrag.get("nummer", "")
         sale = sales_by_id.get(bid)
         if sale is None:
-            print(f"  ⚠ Verkauf {bid} (Rechnung {nummer}) nicht mehr im Export — uebersprungen.")
-            fehler += 1
+            # Verkauf aus dem rollierenden Export-Fenster gefallen: kein Dauerfehler,
+            # sondern EIN Review-Item (dedupe via stabilem Text+Bezug).
+            print(f"  ⚠ Verkauf {bid} (Rechnung {nummer}) nicht mehr im Export — Review.")
+            queue_reg = _review_queue(config)
+            queue_reg.add(f"Rechnung {nummer}: Verkaufsdaten nicht mehr im Export — "
+                          "manuell pruefen/uebertragen", bezug=f"rechnung:{bid}")
             continue
         r = rechnung_aus_verkauf(sale, nummer=nummer, absender=absender,
                                  kleinunternehmer=ku, hinweis=hinweis)
@@ -1035,14 +1061,32 @@ def cmd_lexware_belege(config: dict, tage: str = "") -> int:
 
 
 def _warenbuch_kaeufe(config: dict) -> list:
-    """Kaeufe fuer das Warenbuch: eBay-Kaufhistorie + in Lexware hinterlegte Belege."""
+    """Kaeufe fuer das Warenbuch: eBay-Kaufhistorie + in Lexware hinterlegte Belege.
+
+    Dedupe: hat der Nutzer denselben eBay-Kauf auch als Foto-Beleg in Lexware
+    hinterlegt (gleiches Datum + gleicher Betrag), zaehlt er nur EINMAL."""
     kaeufe = []
+    gesehen = set()   # (datum, betrag) der eBay-Kaeufe
     for r in (_lade_json(config.get("pfade", {}).get("ebay_kaeufe_export", "")) or []):
+        preis = str(r.get("price") or r.get("preis") or "0")
+        datum = str(r.get("date") or "")[:10]
+        try:
+            gesehen.add((datum, str(Decimal(preis.replace(",", ".")).quantize(Decimal("0.01")))))
+        except Exception:  # noqa: BLE001
+            pass
         kaeufe.append({"product_id": r.get("product_id"), "title": r.get("title"),
-                       "preis": r.get("price") or r.get("preis") or "0", "quelle": "ebay"})
+                       "preis": preis, "datum": datum, "quelle": "ebay"})
     for b in (_lade_json(config.get("pfade", {}).get("lexware_belege", "")) or []):
+        datum = str(b.get("datum") or "")[:10]
+        betrag = str(b.get("betrag", "0"))
+        try:
+            schluessel = (datum, str(Decimal(betrag.replace(",", ".")).quantize(Decimal("0.01"))))
+        except Exception:  # noqa: BLE001
+            schluessel = (datum, betrag)
+        if schluessel in gesehen:
+            continue   # derselbe Kauf ist schon als eBay-Kauf erfasst
         kaeufe.append({"product_id": "", "title": b.get("kontakt") or "Lexware-Beleg",
-                       "preis": b.get("betrag", "0"), "quelle": "lexware"})
+                       "preis": betrag, "datum": datum, "quelle": "lexware"})
     return kaeufe
 
 
@@ -1339,6 +1383,22 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
             euer.ausgaben_je_kategorie.get("wareneinkauf", Decimal("0")) + wareneinkauf)
         euer.hinweise.append("Wareneinkauf enthaelt auch vor Gruendung gekaufte Ware "
                              "(Einlage) — Bewertung/Behandlung mit Steuerberater klaeren.")
+    # In Lexware hinterlegte Einkaufsbelege (Foto-Belege) ebenfalls als Wareneinkauf —
+    # dedupe gegen eBay-Kaeufe via (Datum, Betrag) passiert in _warenbuch_kaeufe.
+    lex_ek = Decimal("0")
+    for k in _warenbuch_kaeufe(config):
+        if k.get("quelle") != "lexware":
+            continue
+        try:
+            lex_ek += Decimal(str(k.get("preis") or "0").replace(",", "."))
+        except Exception:  # noqa: BLE001
+            continue
+    lex_ek = lex_ek.quantize(Decimal("0.01"))
+    if lex_ek > 0:
+        euer.ausgaben_je_kategorie["wareneinkauf"] = (
+            euer.ausgaben_je_kategorie.get("wareneinkauf", Decimal("0")) + lex_ek)
+        euer.hinweise.append(f"Lexware-Einkaufsbelege {lex_ek} EUR als Wareneinkauf "
+                             "einbezogen (Dedupe gegen eBay-Kaeufe via Datum+Betrag).")
     # eBay-Verkaufsgebuehren: ECHT aus der Finances-API (signiert) bevorzugen,
     # sonst Schaetzung (% vom Umsatz + fixe Gebuehr je Verkauf).
     costs = config.get("costs", {})
@@ -1383,9 +1443,11 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
     # § 13b UStG Reverse-Charge: eBay (Luxemburg) stellt die Gebuehren als sonstige
     # Leistung an SERO -> SERO schuldet 19 % USt darauf ans FA. Gilt AUCH fuer
     # Kleinunternehmer (§13b Abs. 8). Kein Vorsteuerabzug (§19) -> echte Zusatzkosten.
+    # NUR auf ECHTE Gebuehren (Finances-API) buchen — nie auf die Schaetzung, sonst
+    # entstuende eine Steuerschuld auf einer Fantasie-Bemessungsgrundlage.
     rc_basis = (gebuehren + werbung).quantize(Decimal("0.01"))
     ust_13b = Decimal("0")
-    if rc_basis > 0:
+    if rc_basis > 0 and fees_real:
         ust_13b = (rc_basis * Decimal("0.19")).quantize(Decimal("0.01"))
         euer.ausgaben_je_kategorie["ust_13b_reverse_charge"] = (
             euer.ausgaben_je_kategorie.get("ust_13b_reverse_charge", Decimal("0")) + ust_13b)
@@ -1393,8 +1455,13 @@ def cmd_sync(config: dict, belege_dir: str = "", csv_path: str = "") -> int:
             f"§13b: {ust_13b} EUR USt auf eBay-Gebuehren ({rc_basis} EUR) ans Finanzamt "
             "abzufuehren — USt-VA noetig (Kz 46/47), AUCH als Kleinunternehmer; kein "
             "Vorsteuerabzug. USt-IdNr beim BZSt beantragen. Mit Steuerberater klaeren.")
-        queue.add(f"§13b Reverse-Charge: {ust_13b} EUR USt auf eBay-Gebuehren ans FA "
-                  "(USt-VA Kz 46/47, USt-IdNr noetig)", bezug="ust_13b")
+        # Betrag NICHT in den grund-Text (sonst neues Review-Item bei jeder Aenderung).
+        queue.add("§13b Reverse-Charge auf eBay-Gebuehren: USt ans FA abfuehren "
+                  "(USt-VA Kz 46/47, USt-IdNr noetig — Betrag siehe /report)", bezug="ust_13b")
+    elif rc_basis > 0:
+        euer.hinweise.append(
+            "§13b-Hinweis: eBay-Gebuehren unterliegen dem Reverse-Charge (19 % USt ans FA, "
+            "auch als KU). Betrag erst nach `ebay-finances` (echte Gebuehren) verlaesslich.")
 
     # Gesamtsumme + Gewinn neu berechnen.
     euer.ausgaben_gesamt = sum(euer.ausgaben_je_kategorie.values(), Decimal("0"))
@@ -1753,8 +1820,12 @@ def cmd_run_all(config: dict) -> int:
     if os.path.exists(pfade.get("ebay_kaeufe_export", "")):
         _schritt("eBay-Kaeufe -> Einkaufspreise", lambda: cmd_ebay_kaeufe(config))
 
-    # 2) eBay-Verkaeufe abrufen (Trading-API; Verkaufszeilen ohne Signatur).
-    if hat_token:
+    # 2) Verkaeufe abrufen — QUELLEN-EXKLUSIV: entweder Billbee ODER eBay-Trading.
+    #    Nie beide (dieselbe Bestellung bekaeme zwei IDs -> zwei Rechnungen).
+    bb = config.get("integrationen", {}).get("billbee", {})
+    if bb.get("api_key") and bb.get("user") and bb.get("api_password"):
+        _schritt("Bestellungen (Billbee)", lambda: cmd_billbee_sync(config))
+    elif hat_token:
         _schritt("eBay-Verkaeufe (Trading-API)",
                  lambda: cmd_ebay_verkaeufe_api(config, tage))
 

@@ -69,6 +69,7 @@ class TelegramBot:
     bwa_callback: Optional[Callable[[], str]] = None          # /bwa: Monatsabschluss
     buchhaltung_callback: Optional[Callable[[], str]] = None  # /buchhaltung: ALLES
     bestand_callback: Optional[Callable[[], str]] = None      # /bestand: Warenbuch
+    setup_pin: str = ""          # Erst-Einrichtung: nur wer die PIN sendet, wird Owner
     _offset: int = 0
 
     def __post_init__(self):
@@ -127,6 +128,12 @@ class TelegramBot:
             # Erst-Einrichtung: ist noch niemand freigeschaltet, wird der erste
             # Nutzer automatisch als Eigentuemer registriert (und persistiert).
             if self.owner_store and not self.allowed_user_ids:
+                # Schutz gegen Fremd-Uebernahme: ist eine Setup-PIN gesetzt, wird nur
+                # Eigentuemer, wer sie als Nachricht sendet (steht in Konsole/Logdatei).
+                if self.setup_pin and (text or "").strip() != self.setup_pin:
+                    return ("🔐 Erst-Einrichtung: Bitte sende die Setup-PIN, um dich als "
+                            "Eigentuemer freizuschalten (steht in der Konsole bzw. in "
+                            "data/telegram_setup_pin.txt auf dem Rechner des Agenten).")
                 self.allowed_user_ids.add(user_id)
                 self._save_owner()
                 if self.audit_log is not None:
