@@ -135,7 +135,7 @@ class TestGenerator(unittest.TestCase):
         finally:
             os.remove(p)
         self.assertIn("data:image/png;base64,", h)
-        self.assertIn('class="logo"', h)
+        self.assertIn('class="logo kopf"', h)
         # ohne Logo-Datei: kein kaputtes img-Tag
         h2 = render_html(r, logo_pfad="/nope/fehlt.png")
         self.assertNotIn("<img", h2)
