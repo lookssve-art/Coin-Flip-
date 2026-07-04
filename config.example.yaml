@@ -129,6 +129,14 @@ integrationen:
     refresh_token: ""                    # dauerhaft (~18 Monate); via `ebay-token <code>`
     access_token: ""                     # optional: kurzlebiger User-Token (~2h) als Fallback
     default_tax_scheme: "differenz"      # Verkaeufe per Default § 25a (Sammelware); sonst "regel"
+  billbee:
+    # Multichannel-Bestellquelle. Wenn gesetzt, zieht `buchhaltung` die Verkaeufe
+    # aus Billbee (statt direkt eBay); eBay-Finances liefert weiter §13b/Gebuehren.
+    # API-Zugang muss bei Billbee freigeschaltet sein (Support). Rate-Limit ~2 rps.
+    api_key: ""                          # X-Billbee-Api-Key (Partner-/App-Key)
+    user: ""                             # Billbee-Login (E-Mail)
+    api_password: ""                     # API-Passwort aus den Billbee-Kontoeinstellungen
+    base_url: "https://api.billbee.io/api/v1"
   bank:
     provider: "lexware_csv"              # Lexware Office = Geschaeftskonto -> CSV-Export
     csv_mapping: {}                      # optional: {date: "...", amount: "...", text: "..."}

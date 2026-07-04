@@ -21,7 +21,8 @@ Verwendung:
     python run.py rechnung-setup ...   # Absenderdaten in config.yaml schreiben (Firmenangaben)
     python run.py rechnungen           # Rechnungen aus eBay-Verkaeufen erzeugen (Billbee-Ersatz)
     python run.py rechnungen-push      # Erzeugte Rechnungen nach Lexware Office uebertragen
-    python run.py buchhaltung          # ALLES: eBay->Rechnungen->Lexware->Gegenrechnung (1 Befehl)
+    python run.py billbee-sync [tage]  # Bestellungen aus Billbee ziehen (Multichannel)
+    python run.py buchhaltung          # ALLES: eBay/Billbee->Rechnungen->Lexware->Gegenrechnung
     python run.py bwa                  # BWA/Monatsabschluss (Rohertrag, Kosten, Kennzahlen)
     python run.py pruefung             # Plausibilitaet (IBAN/USt-IdNr/Dubletten)
     python run.py kann                 # Funktionsumfang anzeigen (Master-Prompt-Abgleich)
@@ -961,6 +962,40 @@ def cmd_kann(config: dict) -> int:
     return 0
 
 
+def cmd_billbee_sync(config: dict, tage: str = "") -> int:
+    """Holt die Bestellungen aus Billbee und schreibt sie als Verkaufszeilen
+    (data/ebay_rows.json) — die restliche Steuer-Pipeline rechnet darauf weiter."""
+    import json
+    from datetime import date, timedelta
+    from src.integrations import BillbeeClient
+    bb = config.get("integrationen", {}).get("billbee", {})
+    if not (bb.get("api_key") and bb.get("user") and bb.get("api_password")):
+        print("Billbee-Zugang unvollstaendig (integrationen.billbee: api_key/user/api_password).")
+        return 2
+    beginn = _geschaeftsbeginn(config)
+    if tage:
+        von = (date.today() - timedelta(days=int(tage))).isoformat()
+    else:
+        von = beginn.isoformat() if beginn else (date.today() - timedelta(days=90)).isoformat()
+    try:
+        client = BillbeeClient(api_key=bb["api_key"], user=bb["user"],
+                               api_password=bb["api_password"],
+                               base_url=bb.get("base_url", "https://api.billbee.io/api/v1"))
+        rows = client.alle_bestellungen(
+            von=von, default_tax_scheme=config.get("integrationen", {}).get(
+                "ebay", {}).get("default_tax_scheme", "differenz"))
+    except Exception as exc:  # noqa: BLE001
+        print(f"Billbee-Abruf fehlgeschlagen: {exc}\n"
+              "Pruefe: API-Zugang bei Billbee freigeschaltet, api_password korrekt.")
+        return 1
+    pfad = config.get("pfade", {}).get("ebay_export", "data/ebay_rows.json")
+    os.makedirs(os.path.dirname(pfad) or ".", exist_ok=True)
+    with open(pfad, "w", encoding="utf-8") as fh:
+        json.dump(rows, fh, ensure_ascii=False, indent=2)
+    print(f"Billbee: {len(rows)} Bestellungen (ab {von}) -> {pfad}.")
+    return 0
+
+
 def cmd_buchhaltung(config: dict) -> int:
     """DER EINE BEFEHL — komplette Buchhaltung ab Geschaeftsbeginn:
     eBay-Kaeufe+Verkaeufe ziehen, echte Gebuehren/Werbung/Auszahlungen holen,
@@ -973,8 +1008,23 @@ def cmd_buchhaltung(config: dict) -> int:
     tage = str(config.get("betrieb", {}).get("ebay_sync_tage", 30))
     beginn = _geschaeftsbeginn(config)
 
+    billbee = config.get("integrationen", {}).get("billbee", {})
+    quelle_billbee = bool(billbee.get("api_key") and billbee.get("user")
+                          and billbee.get("api_password"))
+
     print("🧮 Komplette Buchhaltung wird erstellt …\n")
-    if hat_token:
+    if quelle_billbee:
+        # Bestellungen kommen aus Billbee (Multichannel) statt direkt von eBay.
+        _schritt("1/6 Bestellungen aus Billbee", lambda: cmd_billbee_sync(config))
+        if hat_token and os.path.exists(_signing_key_pfad(config)):
+            _schritt("2/6 Echte eBay-Gebuehren + Werbung + Auszahlungen (fuer §13b)",
+                     lambda: cmd_ebay_finances(config))
+        else:
+            print("2/6 eBay-Gebuehren: Schaetzung (kein eBay-Signaturschluessel).")
+        if hat_token:
+            _schritt("3/6 eBay-Kaeufe (Wareneinkauf §25a)",
+                     lambda: (cmd_ebay_kaeufe_api(config, tage), cmd_ebay_kaeufe(config)))
+    elif hat_token:
         _schritt("1/6 eBay-Kaeufe (Wareneinkauf)", lambda: cmd_ebay_kaeufe_api(config, tage))
         if os.path.exists(config.get("pfade", {}).get("ebay_kaeufe_export", "")):
             _schritt("    Einkaufspreise (§25a)", lambda: cmd_ebay_kaeufe(config))
@@ -989,7 +1039,7 @@ def cmd_buchhaltung(config: dict) -> int:
         else:
             print("3/6 Gebuehren: Schaetzung (Signaturschluessel konnte nicht angelegt werden).")
     else:
-        print("⚠ Kein eBay-Token — bitte `ebay-auth` + `ebay-token` zuerst.")
+        print("⚠ Keine Datenquelle — Billbee einrichten ODER eBay `ebay-auth`+`ebay-token`.")
 
     _schritt("4/6 Rechnungen erzeugen (ab Geschaeftsbeginn)", lambda: cmd_rechnungen(config))
     if lex.get("api_key"):
@@ -1681,6 +1731,7 @@ COMMANDS = {
     "rechnung-setup": cmd_rechnung_setup,
     "rechnungen": cmd_rechnungen,
     "rechnungen-push": cmd_rechnungen_push,
+    "billbee-sync": cmd_billbee_sync,
     "buchhaltung": cmd_buchhaltung,
     "bwa": cmd_bwa,
     "pruefung": cmd_pruefung,

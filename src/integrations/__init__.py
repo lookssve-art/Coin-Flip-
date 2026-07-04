@@ -7,6 +7,7 @@ from .lexware_sync import LexwareSync, PushErgebnis
 from .lexware_invoices import LexwareInvoiceClient, rechnung_zu_lexware
 from .ebay_purchases import normalisiere_kaeufe
 from .ebay_trading import EbayTradingClient, parse_buyer_orders, parse_seller_orders
+from .billbee import BillbeeClient, parse_billbee_orders
 from . import ed25519, ebay_signature
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "LexwareSync", "PushErgebnis", "LexwareInvoiceClient", "rechnung_zu_lexware",
     "normalisiere_kaeufe",
     "EbayTradingClient", "parse_buyer_orders", "parse_seller_orders",
+    "BillbeeClient", "parse_billbee_orders",
     "ed25519", "ebay_signature",
 ]
