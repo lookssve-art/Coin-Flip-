@@ -782,7 +782,8 @@ def cmd_rechnungen(config: dict) -> int:
     os.makedirs(verzeichnis, exist_ok=True)
     ku = bool(config.get("steuer", {}).get("kleinunternehmer", True))
     hinweis = rc.get("kleinunternehmer_hinweis") or None
-    neu = 0
+    from src.pruefung import versandfertig, fehler_texte
+    neu, unvollstaendig = 0, 0
     # Aeltere Verkaeufe zuerst -> Nummern in zeitlicher Reihenfolge.
     for s in sorted(sales, key=lambda x: (x.datum, str(x.id))):
         if reg.hat(str(s.id)):
@@ -797,12 +798,21 @@ def cmd_rechnungen(config: dict) -> int:
             fh.write(render_text(r))
         with open(basis + ".json", "w", encoding="utf-8") as fh:
             json.dump(r.als_dict(), fh, ensure_ascii=False, indent=2)
-        reg.merke(str(s.id), nummer, datei=basis + ".html", betrag=str(r.summe),
-                  datum=r.datum.isoformat())
+        # 1. Prüfpass (der 2. läuft beim Push): fehlende Pflichtangaben markieren.
+        ok, befunde = versandfertig(r, kleinunternehmer=ku)
+        eintrag = {"datei": basis + ".html", "betrag": str(r.summe),
+                   "datum": r.datum.isoformat(), "geprueft_ok": ok}
+        if not ok:
+            eintrag["maengel"] = fehler_texte(befunde)
+            unvollstaendig += 1
+        reg.merke(str(s.id), nummer, **eintrag)
         neu += 1
     gesamt = len(reg.alle())
     print(f"Rechnungen: {neu} neu erzeugt -> {verzeichnis} "
           f"({gesamt} gesamt im Register).")
+    if unvollstaendig:
+        print(f"  ⚠ {unvollstaendig} Rechnung(en) mit fehlenden Pflichtangaben — werden "
+              "beim Push NICHT gesendet (Selbst-Prüfung). Meist: Absender-Steuernummer.")
     if rc.get("lexware", {}).get("push"):
         print("Tipp: `python run.py rechnungen-push` uebertraegt offene Rechnungen nach Lexware.")
     return 0
@@ -833,7 +843,8 @@ def cmd_rechnungen_push(config: dict) -> int:
     verzeichnis = rc.get("verzeichnis", "belege/rechnungen/")
     client = LexwareInvoiceClient(api_key=api_key,
                                   base_url=lex.get("base_url", "https://api.lexware.io/v1"))
-    erfolg, fehler = 0, 0
+    from src.pruefung import versandfertig, fehler_texte
+    erfolg, fehler, blockiert = 0, 0, 0
     for bid in offen:
         eintrag = reg.eintrag(bid) or {}
         nummer = eintrag.get("nummer", "")
@@ -844,6 +855,15 @@ def cmd_rechnungen_push(config: dict) -> int:
             continue
         r = rechnung_aus_verkauf(sale, nummer=nummer, absender=absender,
                                  kleinunternehmer=ku, hinweis=hinweis)
+        # SELBST-PRÜFUNG vor dem Verschicken: nur vollstaendige/korrekte Rechnungen raus.
+        ok, befunde = versandfertig(r, kleinunternehmer=ku)
+        if not ok:
+            maengel = "; ".join(fehler_texte(befunde))
+            print(f"  ⛔ {nummer}: NICHT gesendet — Pflichtangaben fehlen: {maengel}")
+            _review_queue(config).add(f"Rechnung {nummer} unvollstaendig: {maengel}",
+                                      bezug=f"rechnung:{bid}")
+            blockiert += 1
+            continue
         try:
             res = client.rechnung_anlegen(r, finalize=finalize)
             lex_id = res.get("id", "")
@@ -863,8 +883,9 @@ def cmd_rechnungen_push(config: dict) -> int:
             print(f"  ⚠ {nummer}: Lexware-Push fehlgeschlagen: {exc}")
             fehler += 1
     status = "festgeschrieben" if finalize else "als Entwurf"
-    print(f"Lexware: {erfolg} Rechnungen {status} uebertragen, {fehler} Fehler.")
-    return 0 if fehler == 0 else 1
+    print(f"Lexware: {erfolg} Rechnungen {status} uebertragen, {fehler} Fehler, "
+          f"{blockiert} wegen fehlender Pflichtangaben blockiert (-> /review).")
+    return 0 if (fehler == 0 and blockiert == 0) else 1
 
 
 def _euer_snapshot(config: dict):

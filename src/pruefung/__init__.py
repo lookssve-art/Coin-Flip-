@@ -10,7 +10,9 @@ korrigiert.
 from .checks import (pruefe_iban, pruefe_ust_id, pruefe_rechnung_arithmetik,
                      pruefe_pflichtfelder, ist_dublette, dubletten_schluessel,
                      Befund, Schwere)
+from .rechnung import pruefe_rechnung, versandfertig, fehler_texte
 
 __all__ = ["pruefe_iban", "pruefe_ust_id", "pruefe_rechnung_arithmetik",
            "pruefe_pflichtfelder", "ist_dublette", "dubletten_schluessel",
-           "Befund", "Schwere"]
+           "Befund", "Schwere",
+           "pruefe_rechnung", "versandfertig", "fehler_texte"]
